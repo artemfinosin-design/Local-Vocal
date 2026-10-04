@@ -1,0 +1,17 @@
+**/data/
+**/.runtime/
+**/.venv/
+**/__pycache__/
+build/
+dist/
+*.exe
+*.zip
+*.wav
+*.mp3
+*.webm
+*.ogg
+*.flac
+*.m4a
+*.onnx
+*.pth
+*.log

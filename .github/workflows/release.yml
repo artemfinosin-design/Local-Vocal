@@ -1,0 +1,31 @@
+name: Windows release
+on:
+  push:
+    tags: ['v0.*.0']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install launcher build tools
+        run: python -m pip install pyinstaller pywebview pythonnet pillow
+      - name: Verify update transaction
+        run: python -m unittest discover -s karaoke-studio -p test_updater.py
+      - name: Check Python syntax
+        run: python -m compileall -q karaoke-studio tools
+      - name: Build release
+        run: python tools/build_release.py
+      - name: Publish tagged release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = (Get-Content karaoke-studio/runtime.py | Select-String '^BACKEND_VERSION = (\d+)$').Matches[0].Groups[1].Value
+          gh release create "$env:GITHUB_REF_NAME" "dist/karaoke-studio-beta$version.zip" dist/update-manifest.json --verify-tag --title "Local Vocal β$version" --notes-file RELEASE_NOTES.md

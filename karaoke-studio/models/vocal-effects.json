@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "sources": [
+    "vocals.wav",
+    "vocals.wav",
+    "vocals.wav",
+    "vocals.wav",
+    "vocals.wav",
+    "vocals.wav",
+    "vocals.wav",
+    "vocals.wav",
+    "vocals.wav",
+    "vocals.wav",
+    "provided-vocal-1.wav",
+    "provided-vocal-2.wav",
+    "vocals.wav",
+    "vocals.wav"
+  ],
+  "train_examples": 1008,
+  "validation_examples": 336,
+  "test_examples": 440,
+  "parameters": [
+    "room",
+    "decay",
+    "delay_wet",
+    "width"
+  ],
+  "validation_mae": [
+    0.046873837533234396,
+    0.5175720618474984,
+    0.05547494976094351,
+    0.05592598774897391
+  ],
+  "test_mae": [
+    0.056855354507312064,
+    0.5523109382934209,
+    0.0645247950629136,
+    0.060542540034293
+  ],
+  "baseline_mae": [
+    0.11411132146085193,
+    0.5561198101901779,
+    0.10103116405633358,
+    0.29413048614779025
+  ],
+  "enabled": [
+    true,
+    false,
+    true,
+    true
+  ],
+  "scope": "Оценка синтетически добавленной обработки. Исходные эффекты образцов неизвестны.",
+  "split": "Непересекающиеся исходные фрагменты; параметры подбираются на проверочной выборке.",
+  "estimator": "ExtraTrees, 80 деревьев; безопасные числовые массивы без pickle"
+}
