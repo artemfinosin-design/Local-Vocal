@@ -7,6 +7,20 @@ from voice import tuning_options,tuning_profile
 import app
 
 class TuningChecks(unittest.TestCase):
+    def test_room_persists_past_eight_seconds_but_stops_on_dry_evidence(self):
+        from unittest.mock import patch
+        from effects import analyze_effects
+        def block(room=0,dry=0,width=.3):
+            return dict(room=room,decay=.5,decay_evidence=2 if room else 0,
+                        delay_wet=0,delay=.28,width=width,confidence=0,dry_evidence=dry,active=True)
+        with patch('effects.estimate',side_effect=[block(.1)]+[block() for _ in range(5)]+[block(dry=2),block()]):
+            blocks=analyze_effects(np.zeros((RATE*32,2),np.float32))
+        self.assertEqual(blocks[5]['room'],.1)
+        self.assertEqual(blocks[6]['room'],0)
+        self.assertEqual(blocks[7]['room'],0)
+        with patch('effects.estimate',side_effect=[block(.1),block(width=.8)]):
+            blocks=analyze_effects(np.zeros((RATE*8,2),np.float32))
+        self.assertEqual(blocks[1]['room'],0)
     def test_backing_gain_is_not_calibrated_to_silent_microphone_noise(self):
         from audio_core import _stable_vocal_gain
         measured=np.full(100,.001);measured[40:55]=.08
@@ -18,9 +32,9 @@ class TuningChecks(unittest.TestCase):
     def test_effect_gaps_require_measured_neighbours(self):
         from unittest.mock import patch
         from effects import analyze_effects
-        def block(room=0,delay=0):
-            return dict(room=room,decay=.5,decay_evidence=int(room>0),delay_wet=delay,delay=.28,width=0,confidence=.95)
-        with patch('effects.estimate',side_effect=[block(.1,.15),block(.1),block(0,.15),block()]):
+        def block(room=0,delay=0,dry=0):
+            return dict(room=room,decay=.5,decay_evidence=int(room>0),delay_wet=delay,delay=.28,width=0,confidence=.95,dry_evidence=dry)
+        with patch('effects.estimate',side_effect=[block(.1,.15),block(.1),block(0,.15),block(dry=2)]):
             blocks=analyze_effects(np.zeros((RATE*16,2),np.float32))
         self.assertEqual(blocks[2]['room'],.1)
         self.assertEqual(blocks[1]['delay_wet'],.15)

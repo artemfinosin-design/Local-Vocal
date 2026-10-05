@@ -21,6 +21,17 @@ def singer(pitch,formants,seconds=2):
 
 
 class RoleChecks(unittest.TestCase):
+    def test_unpitched_end_response_is_offered_but_lead_leakage_is_not(self):
+        from scipy.signal import butter,sosfilt
+        lead=singer(180,(600,1400,2600),6)
+        noise=np.random.default_rng(19).normal(0,.15,RATE)
+        speech=sosfilt(butter(3,[600,3000],btype='bandpass',fs=RATE,output='sos'),noise)
+        back=np.zeros_like(lead);back[4*RATE:5*RATE]=speech[:,None]
+        meta=analyze(lead,back,lead+back)
+        role=next(r for r in meta['roles'] if r['id']=='backing')
+        self.assertTrue(any(start<=4.5<end for start,end in role['segments']))
+        leaked=analyze(lead,lead*.3,lead*1.3)
+        self.assertFalse(any(r['id']=='backing' for r in leaked['roles']))
     def test_saved_project_refresh_preserves_recordings_and_exclusions(self):
         with tempfile.TemporaryDirectory() as temporary, patch('app.DATA',Path(temporary)), patch('app.jobs',{}):
             identity='a'*32;folder=Path(temporary)/identity;folder.mkdir()
@@ -40,7 +51,7 @@ class RoleChecks(unittest.TestCase):
                 time.sleep(.02)
             self.assertEqual(app.jobs[identity]['analysis_state'],'ready')
             refreshed=json.loads((folder/'analysis.json').read_text(encoding='utf-8'))
-            self.assertEqual(refreshed['version'],12)
+            self.assertEqual(refreshed['version'],13)
             self.assertEqual(refreshed['roles'][0]['excluded'],[[0,.5]])
             self.assertEqual(len(app.jobs[identity]['tracks']),1)
             self.assertEqual(app.jobs[identity]['renders'],[render])

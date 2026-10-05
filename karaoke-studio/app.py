@@ -124,7 +124,7 @@ def restore_jobs():
                 save_guides(folder, meta)
                 jobs[folder.name] = job
                 save_job(folder.name,touch=False)
-                if (job.get('version', 2) < 3 or meta.get('version', 0) < 12) and all((folder / (name + '.wav')).is_file() for name in ('lead','backing')):
+                if (job.get('version', 2) < 3 or meta.get('version', 0) < 13) and all((folder / (name + '.wav')).is_file() for name in ('lead','backing')):
                     outdated.append(folder.name)
         except (OSError, ValueError, TypeError):
             continue

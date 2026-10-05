@@ -175,6 +175,13 @@ def estimate(samples, rate=RATE, learned=True):
     hop = 220 if rate==RATE else max(1,round(rate*.02))
     padded = np.pad(mono**2,(0,(-len(mono))%hop))
     envelope = np.sqrt(np.mean(padded.reshape(-1,hop),axis=1)+1e-12)
+    # Repeated abrupt clean endings are negative evidence. Continuous singing
+    # with no exposed tail is merely inconclusive, not evidence of dry sound.
+    dry_endings=0
+    ending_floor=max(.004,float(np.percentile(envelope,85))*.2)
+    for at in range(1,len(envelope)-31):
+        if envelope[at-1]>ending_floor and envelope[at]<envelope[at-1]*.01:
+            if np.max(envelope[at:at+30])<envelope[at-1]*.01:dry_endings+=1
     decays=[]
     for at in range(0,len(envelope)-30,5):
         part=envelope[at:at+30]
@@ -215,7 +222,8 @@ def estimate(samples, rate=RATE, learned=True):
     if np.sqrt(np.mean(reduced ** 2)) < .001:
         result[[0, 2, 3]] = 0
     return dict(zip(PARAMETERS, map(float, result)), delay=delay,
-                confidence=float(delay_confidence), decay_evidence=len(decays), learned=enabled.tolist())
+                confidence=float(delay_confidence), decay_evidence=len(decays),
+                dry_evidence=dry_endings, active=bool(np.sqrt(np.mean(reduced**2))>=.001), learned=enabled.tolist())
 
 
 def analyze_effects(samples):
@@ -228,20 +236,24 @@ def analyze_effects(samples):
         any(other is not b and other['room']>0 and other['decay_evidence']>=1
             and abs(other['time']-b['time'])<=4 and
             abs(other['decay']-b['decay'])<.25 for other in blocks))]
-    for block in blocks:
-        if block['room'] or not trusted:continue
-        nearest=min(trusted,key=lambda b:abs(b['time']-block['time']))
-        # Continuous singing hides tails. A nearby measured room remains a
-        # useful estimate, not proof that this block is completely dry.
-        if abs(nearest['time']-block['time'])<=8:
-            block.update(room=nearest['room'],decay=nearest['decay'],room_inherited=True)
-    # A missing waveform-copy measurement during continuous singing isn't an
-    # off switch. Bridge one block only between matching confirmed delays.
-    for index,block in enumerate(blocks[1:-1],1):
-        before,after=blocks[index-1],blocks[index+1]
-        if not block['delay_wet'] and before['delay_wet'] and after['delay_wet'] and abs(before['delay']-after['delay'])<.01:
-            block.update(delay=(before['delay']+after['delay'])/2,
-                         delay_wet=min(before['delay_wet'],after['delay_wet']),delay_inherited=True)
+    # Keep a measured send through acoustically consistent singing until a dry
+    # ending, silence or changed stereo scene contradicts it. No time cutoff.
+    echoes=[b for b in blocks if b['delay_wet']>0 and b['confidence']>=.84]
+    for field,parameters,support in (('room',('room','decay'),trusted),
+                                     ('delay_wet',('delay_wet','delay'),echoes)):
+        anchor=None
+        for block in blocks:
+            if block in support:anchor=block
+            if not block.get('active',True) or block.get('dry_evidence',0)>=2:
+                anchor=None
+                continue
+            if anchor and abs(block['width']-anchor['width'])>max(.12,anchor['width']*.35):anchor=None
+            if block[field] or not support:continue
+            nearest=anchor or min(support,key=lambda b:abs(b['time']-block['time']))
+            if anchor or (abs(nearest['time']-block['time'])<=4 and
+                    abs(nearest['width']-block['width'])<=max(.12,nearest['width']*.35)):
+                block.update({key:nearest[key] for key in parameters})
+                block['room_inherited' if field=='room' else 'delay_inherited']=True
     return blocks
 
 

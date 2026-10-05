@@ -220,9 +220,21 @@ def analyze(vocals, backing=None, full_vocals=None):
                 b=main_source[round(start*RATE):round(end*RATE)].reshape(-1)
                 shared=abs(float(np.dot(a,b)))/(float(np.linalg.norm(a)*np.linalg.norm(b))+1e-9)
                 voiced=np.mean((pitch[portion]>0)&(confidence[portion]>.55)) if np.any(portion) else 0
-                if voiced>=.3 and shared<.65 and np.sqrt(np.mean(b*b))>threshold:
+                # Spoken/filtered responses need not have a stable fundamental.
+                # Accept clear short vocal-band phrases independent of the lead,
+                # while retaining the leakage guard for recovered main vocals.
+                mono=np.mean(backing[round(start*RATE):round(end*RATE)],axis=1)
+                spectrum=abs(np.fft.rfft(mono))**2
+                frequencies=np.fft.rfftfreq(len(mono),1/RATE)
+                vocal_band=float(np.sum(spectrum[(frequencies>250)&(frequencies<4500)])/(np.sum(spectrum)+1e-12))
+                spoken=(end-start<=5 and shared<.35 and vocal_band>.65 and
+                        np.sqrt(np.mean(a*a))>threshold*1.5)
+                if (voiced>=.3 or spoken) and shared<.65 and np.sqrt(np.mean(b*b))>threshold:
                     accepted.append([start,end])
             segments=accepted
+        # Leave one analysis frame around short responses so quiet consonants
+        # don't fall outside the selected recording region.
+        segments=[[max(0,start-HOP/RATE),min(len(backing)/RATE,end+HOP/RATE)] for start,end in segments]
         mask[:] = False
         for start,end in segments:
             mask[round(start*RATE/HOP):round(end*RATE/HOP)] = True
@@ -240,7 +252,7 @@ def analyze(vocals, backing=None, full_vocals=None):
             identity=f"{reference}:{event['type']}:{event['start']:.2f}:{event['end']:.2f}"
             event.update(id=hashlib.sha256(identity.encode()).hexdigest()[:24],reference=reference,status='pending')
             proposals.append(event)
-    return {"effect_proposals":proposals, "version": 12, "effect_version": 4, "hop": HOP / RATE, "profiles": profiles, "roles": roles}
+    return {"effect_proposals":proposals, "version": 13, "effect_version": 4, "hop": HOP / RATE, "profiles": profiles, "roles": roles}
 
 
 def markers(meta):
