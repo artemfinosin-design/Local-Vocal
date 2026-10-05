@@ -3,10 +3,14 @@ from pathlib import Path
 from types import SimpleNamespace as Obj
 from unittest.mock import patch
 import app
-from lyrics import lookup,result_lines
+from lyrics import lookup,result_lines,guess_title
 
 
 class LyricsChecks(unittest.TestCase):
+    def test_filename_keeps_artist_separator_and_removes_download_labels(self):
+        self.assertEqual(guess_title('01_Artist — Song_(Official Video).mp3'),dict(artist='Artist',title='Song'))
+        self.assertEqual(guess_title('Artist - (Video Games).mp3'),dict(artist='Artist',title='Video Games'))
+
     def test_upload_searches_before_separation_and_keeps_lyrics_at_ready(self):
         import numpy as np
         from audio_core import RATE,write_wav

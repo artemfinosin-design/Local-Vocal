@@ -19,8 +19,8 @@ def guess_title(filename):
 
 
 def clean_query(value):
-    value=re.sub(r'[\(\[][^)\]]*(?:official|lyrics?|video|audio|vocals?|remaster|клип|текст)[^)\]]*[\)\]]',' ',value,flags=re.I)
-    value=unicodedata.normalize('NFKC',value).replace('’',"'").replace('“','').replace('”','')
+    value=re.sub(r'[\(\[]\s*(?:official(?:\s+[^)\]]*)?|(?:music\s+)?video|lyrics?(?:\s+video)?|audio|vocals?(?:\s+only)?|remaster(?:ed)?(?:\s+\d{4})?|клип|текст)\s*[\)\]]',' ',value,flags=re.I)
+    value=unicodedata.normalize('NFKC',value).replace('’',"'").replace('“','').replace('”','').replace('—','-').replace('–','-')
     return re.sub(r'\s+',' ',re.sub(r'[^\w\s\-\'&]',' ',value)).strip()
 
 
