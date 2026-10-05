@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 from audio_core import analyze, markers, mix, read_wav, read_reference, role_guide, save_meta, write_wav
 from runtime import ffmpeg_path, BACKEND_VERSION
-from lyrics import guess_title, lookup
+from lyrics import guess_title, lookup, lrc_lines
 from effects import train as train_effects, REPORT, analyze_effects, SPACE_MODES
 
 HERE = Path(__file__).resolve().parent
@@ -96,6 +96,8 @@ def restore_jobs():
             job = json.loads(saved.read_text(encoding="utf-8"))
             if job.get("state") == "ready" and all((folder / (name + ".wav")).is_file()
                                                     for name in ("vocals", "instrumental")):
+                if job.get('lyrics_state') in {'searching','waiting','processing'}:
+                    job.update(lyrics_state='error',lyrics_error='Привязка текста была прервана. Найди текст снова или повтори привязку.')
                 if job.get("version", 1) < 2:
                     meta = analyze(read_wav(folder / "vocals.wav"))
                     save_meta(folder / "analysis.json", meta)
@@ -173,11 +175,17 @@ def prepare(job_id, uploaded, filename=""):
         with lock:
             jobs[job_id]["state"] = "Преобразую файл"
         convert(uploaded, folder / "song.wav", 2)
+        info=song_info(uploaded,filename)
+        with wave.open(str(folder/'song.wav')) as song:duration=song.getnframes()/song.getframerate()
         with lock:
+            jobs[job_id].update(song_info=info,duration=duration,lyrics_state='searching')
             jobs[job_id]["state"] = "Разделяю вокал и музыку — это может занять несколько минут"
+        threading.Thread(target=find_project_lyrics,args=(job_id,info['artist'],info['title']),daemon=True).start()
         with processing_lock:
             command(sys.executable, str(HERE / "separate_audio.py"), str(folder / "song.wav"),
                     str(folder), str(HERE / "models"))
+        with lock:jobs[job_id]['lyrics_audio_ready']=True
+        queue_found_lyrics(job_id)
         with lock:
             jobs[job_id]["state"] = "Размечаю партии и обработку голоса"
         meta = analyze(read_wav(folder / "lead.wav"), read_wav(folder / "backing.wav"), read_wav(folder / "vocals.wav"))
@@ -186,12 +194,12 @@ def prepare(job_id, uploaded, filename=""):
         save_meta(folder / "analysis.json", meta)
         save_guides(folder, meta)
         with lock:
-            jobs[job_id] = {"state": "ready", "markers": markers(meta),
+            jobs[job_id].update({"state": "ready", "markers": markers(meta),
                             "duration": round(len(read_wav(folder / "instrumental.wav")) / 44100, 1),
                             "roles": [{key: value for key, value in role.items() if key != "mask"}
                                       for role in meta["roles"]],
-                            "version": 3, "filename": filename, "song_info": song_info(uploaded, filename),
-                            "tracks": [], "renders": []}
+                            "version": 3, "filename": filename,
+                            "tracks": [], "renders": []})
             save_job(job_id)
             start_learning = learning['state'] != 'processing'
             if start_learning:
@@ -275,17 +283,71 @@ def refresh_analysis(job_id, separate_again=False):
                 save_job(job_id)
 
 
+def start_lyrics(job_id, settings):
+    folder=DATA/job_id
+    request_file=folder/('lyrics-request-'+uuid.uuid4().hex+'.json')
+    request_file.write_text(json.dumps(settings,ensure_ascii=False),encoding='utf-8')
+    # Own the generation before dispatch. A stale worker cannot replace a newer
+    # text or its timing, even when the model is already running in a subprocess.
+    jobs[job_id].update(lyrics_state='processing',lyrics_request=request_file.name)
+    jobs[job_id].pop('lyrics_error',None)
+    save_job(job_id)
+    threading.Thread(target=synchronize_lyrics,args=(job_id,request_file),daemon=True).start()
+
+
+def queue_found_lyrics(job_id):
+    with lock:
+        job=jobs.get(job_id)
+        if not job or job.get('state')=='error' or job.get('lyrics_state')!='waiting':return
+        if not (job.get('lyrics_audio_ready') or job.get('state')=='ready'):return
+        candidate=job['lyrics_candidate']
+        start_lyrics(job_id,dict(text=candidate['text'],method='audio',source=candidate['source']))
+
+
+def find_project_lyrics(job_id, artist, title):
+    token=uuid.uuid4().hex
+    with lock:
+        jobs[job_id].update(lyrics_state='searching',lyrics_search_id=token,lyrics_request=None)
+        duration=jobs[job_id]['duration']
+    try:
+        candidate=lookup(artist,title,duration)
+        with lock:
+            job=jobs.get(job_id)
+            if not job or job.get('state')=='error' or job.get('lyrics_search_id')!=token:return candidate
+            job['lyrics_candidate']=candidate
+            job['lyrics_state']='waiting' if candidate['found'] else 'not_found'
+            if candidate['found']:
+                job['song_info']={'artist':candidate['artist'],'title':candidate['title']}
+                if candidate.get('synced'):
+                    preview=lrc_lines(candidate['synced'],duration)
+                    if preview['lines']:
+                        preview.update(text=candidate['text'],source=candidate['source'])
+                        job['lyrics']=preview;save_meta(DATA/job_id/'lyrics.json',preview)
+            save_job(job_id)
+        queue_found_lyrics(job_id)
+        return candidate
+    except Exception as exc:
+        with lock:
+            job=jobs.get(job_id)
+            if job and job.get('state')!='error' and job.get('lyrics_search_id')==token:
+                job.update(lyrics_state='error',lyrics_error=str(exc)[-1000:]);save_job(job_id)
+        return {'found':False,'error':str(exc)}
+
+
 def synchronize_lyrics(job_id, request_file):
     folder = DATA / job_id
     try:
         with processing_lock:
             command(sys.executable, str(HERE / 'lyrics_worker.py'), str(folder), str(HERE / 'models'), str(request_file))
-        result = json.loads((folder / 'lyrics.json').read_text(encoding='utf-8'))
+        result = json.loads(request_file.with_suffix('.result.json').read_text(encoding='utf-8'))
         with lock:
+            if jobs[job_id].get('lyrics_request')!=request_file.name:return
+            save_meta(folder/'lyrics.json',result)
             jobs[job_id].update(lyrics=result, lyrics_state='ready')
             save_job(job_id)
     except Exception as exc:
         with lock:
+            if jobs[job_id].get('lyrics_request')!=request_file.name:return
             jobs[job_id].update(lyrics_state='error', lyrics_error=str(exc)[-1000:])
 
 
@@ -503,7 +565,7 @@ class Handler(BaseHTTPRequestHandler):
                     if parsed.path=='/api/history-delete':
                         job=jobs.get(identity)
                         if job is None:raise ValueError('Песня не найдена')
-                        if job.get('state')!='ready' or job.get('analysis_state')=='processing' or job.get('lyrics_state')=='processing':raise ValueError('Дождись обработки песни')
+                        if job.get('state')!='ready' or job.get('analysis_state')=='processing' or job.get('lyrics_state') in {'searching','waiting','processing'}:raise ValueError('Дождись обработки песни')
                         if live.is_symlink() or live.resolve().parent!=DATA.resolve() or deleted.exists():raise ValueError('Папка проекта недоступна')
                         live.rename(deleted);jobs.pop(identity)
                     else:
@@ -515,7 +577,7 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == '/api/shutdown':
                 self.request_body(1000)
                 with lock:
-                    pending = active_posts > 0 or learning['state'] == 'processing' or any(job.get('state') not in {'ready','error'} or job.get('analysis_state') == 'processing' or job.get('lyrics_state') == 'processing' for job in jobs.values())
+                    pending = active_posts > 0 or learning['state'] == 'processing' or any(job.get('state') not in {'ready','error'} or job.get('analysis_state') == 'processing' or job.get('lyrics_state') in {'searching','waiting','processing'} for job in jobs.values())
                     if not pending: stopping = True
                 if pending: return self.reply(409, {'error': 'Дождись окончания обработки перед обновлением студии.'})
                 self.reply(200, {'stopping': True})
@@ -682,10 +744,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(settings, dict):
                     raise ValueError('Неверные параметры')
                 if parsed.path == '/api/lyrics-find':
-                    candidate = lookup(str(settings.get('artist', '')), str(settings.get('title', '')), job['duration'])
-                    with lock:
-                        jobs[job_id]['lyrics_candidate'] = candidate
-                        save_job(job_id)
+                    candidate = find_project_lyrics(job_id,str(settings.get('artist','')),str(settings.get('title','')))
                     return self.reply(200, candidate)
                 if parsed.path == '/api/lyrics':
                     if job.get('lyrics_state') == 'processing':
@@ -693,12 +752,9 @@ class Handler(BaseHTTPRequestHandler):
                     text = settings.get('text', '')
                     if not isinstance(text, str) or len(text) > 30000 or settings.get('method', 'audio') not in {'audio', 'lrc'}:
                         raise ValueError('Некорректный текст; максимум 30000 символов')
-                    request_file = folder / ('lyrics-request-' + uuid.uuid4().hex + '.json')
-                    request_file.write_text(json.dumps(settings, ensure_ascii=False), encoding='utf-8')
                     with lock:
-                        jobs[job_id]['lyrics_state'] = 'processing'
-                        jobs[job_id].pop('lyrics_error', None)
-                    threading.Thread(target=synchronize_lyrics, args=(job_id, request_file), daemon=True).start()
+                        jobs[job_id]['lyrics_search_id']=uuid.uuid4().hex
+                        start_lyrics(job_id,settings)
                     return self.reply(202, {'state': 'processing'})
                 if parsed.path == '/api/reanalyze':
                     separate_again=settings.get('separate',False)

@@ -1,4 +1,5 @@
 [
+  "test_lyrics.py",
   "updater.py",
   "update-config.json",
   "updates-ui.js",

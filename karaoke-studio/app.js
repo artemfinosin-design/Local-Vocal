@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 let projectId, project, roles = [], recording = false, rendering = false, mutating = false, uploading = false, calibrating = false;
 let pollTimer, recorder, recordSession, previewContext, previewGain, previewNodes = [], previewTimer, previewGeneration = 0;
 let lyrics = null, lyricSource = null, lyricFrame, lyricLine = -2, suggestion, analysisPending = false;
+let lyricState='';
 async function request(url, options = {}) {
   const response = await fetch(url, options), body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Не удалось выполнить действие');
@@ -62,13 +63,13 @@ async function upload(file) {
 }
 function resetProject() {
   stopPreview();pauseAll();roles.forEach(role=>role.editor?.dispose());clearTimeout(pollTimer);
-  projectId=null;project=null;roles=[];analysisPending=false;lyrics=null;lyricLine=-2;suggestion=null;
+  projectId=null;project=null;roles=[];analysisPending=false;lyrics=null;lyricLine=-2;suggestion=null;lyricState='';lyricSource=null;cancelAnimationFrame(lyricFrame);
   for(const id of ['roles','takeLibrary','mixDelays','markers','effectProposalList'])$(id).replaceChildren();
   document.querySelectorAll('audio').forEach(audio=>{audio.removeAttribute('src');audio.load();});
   document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());
   $('file').value='';$('lyricsText').value='';$('songArtist').value='';$('songTitle').value='';
   $('lyricsSuggestion').hidden=true;$('resultBox').hidden=true;$('resumeProject').hidden=true;
-  $('analysisStatus').textContent='';$('renderStatus').textContent='';
+  $('analysisStatus').textContent='';$('renderStatus').textContent='';$('lyricsStatus').textContent='';
   $('uploadCard').classList.remove('working');$('status').textContent='Выбери песню или перетащи файл сюда.';
   history.replaceState(null,'',location.pathname+'#sessionStage');
   paintLyrics(0);window.studioFlow.uploading();syncControls();
@@ -81,23 +82,26 @@ function pollProject() {
     try {
       const state=await request('/api/job?id='+current);
       if (current !== projectId) return;
+      lyricState=state.lyrics_state||'';
+      if (state.lyrics && JSON.stringify(state.lyrics)!==JSON.stringify(lyrics)) {
+        lyrics=state.lyrics; if (!$('lyricsText').value.trim()) $('lyricsText').value=lyrics.text;
+        lyricLine=-2; paintLyrics(lyricSource?.currentTime||0);
+      }
+      const lyricMessages={searching:'Ищу текст вместе с обработкой песни…',waiting:'Текст найден и добавлен. Жду выделения вокала для подсветки слов…',processing:'Текст уже добавлен, уточняю подсветку слов локально…',not_found:state.lyrics_candidate?.ambiguous?'Найдено несколько похожих песен. Уточни исполнителя.':'Текст не найден. Уточни название или вставь свой текст.',error:'Не удалось обработать текст: '+state.lyrics_error};
+      $('lyricsStatus').textContent=lyricMessages[lyricState]||lyrics?.notice||'';
+      if(!lyrics)paintLyrics(0);
       if (state.state === 'ready') {
         const changed=analysisPending&&state.analysis_state!=='processing';
         analysisPending=state.analysis_state==='processing';
         if (!project || changed) showProject(state);
         else project=state;
         syncControls();
-        if (state.lyrics_state === 'processing') $('lyricsStatus').textContent='Привязываю текст локально. Первая загрузка модели и длинная песня могут занять несколько минут…';
-        if (state.lyrics_state === 'error') $('lyricsStatus').textContent='Не удалось привязать текст: '+state.lyrics_error;
-        if (state.lyrics && state.lyrics_state !== 'processing' && JSON.stringify(state.lyrics)!==JSON.stringify(lyrics)) {
-          lyrics=state.lyrics; if (!$('lyricsText').value.trim()) $('lyricsText').value=lyrics.text; $('lyricsStatus').textContent=lyrics.notice; lyricLine=-2; paintLyrics(0);
-        }
         $('analysisStatus').textContent=state.analysis_state==='processing' ? 'Обрабатываю вокал и партии. Это может занять несколько минут; записи сохраняются…' : state.analysis_state==='error' ? state.analysis_error : '';
-        if (state.lyrics_state==='processing' || state.analysis_state==='processing') pollTimer=setTimeout(check,1800);
+        if (['searching','waiting','processing'].includes(state.lyrics_state) || state.analysis_state==='processing') pollTimer=setTimeout(check,1800);
         return;
       }
       if (state.state==='error') { $('status').textContent='Не удалось обработать песню: '+state.error; $('uploadCard').classList.remove('working'); return; }
-      $('status').textContent=state.state; pollTimer=setTimeout(check,1500);
+      $('status').textContent=state.state+(lyricMessages[lyricState]?' · '+lyricMessages[lyricState]:''); pollTimer=setTimeout(check,1500);
     } catch(error) {
       if (current !== projectId) return;
       $('status').textContent=error.message; $('uploadCard').classList.remove('working'); localStorage.removeItem('karaokeProject');
@@ -111,7 +115,7 @@ function showProject(state) {
   $('instrumental').src=audioUrl('instrumental'); $('vocals').src=audioUrl('vocals');
   $('songArtist').value=state.song_info?.artist||''; $('songTitle').value=state.song_info?.title||'';
   if(state.lyrics_candidate) showSuggestion(state.lyrics_candidate);
-  else if(state.song_info?.artist&&state.song_info?.title&&!localStorage.getItem('lyrics-looked-'+projectId)) {
+  else if(!state.lyrics_state&&state.song_info?.title&&!localStorage.getItem('lyrics-looked-'+projectId)) {
     localStorage.setItem('lyrics-looked-'+projectId,'1'); findLyrics();
   }
   for (const role of roles) buildRole(role);
@@ -271,10 +275,11 @@ async function render() {
 }
 function paintLyrics(time) {
   const displays=[$('karaokeDisplay'),$('listenLyrics')];
-  if(!lyrics?.lines?.length) { for(const display of displays) display.replaceChildren(element('span','subtle','Открой «Текст караоке», чтобы добавить слова песни.')); return; }
-  let index=lyrics.lines.findIndex(line=>time>=line.start&&time<line.end);
-  if(index<0) index=lyrics.lines.findIndex(line=>line.start>time);
-  if(index<0) index=lyrics.lines.length-1;
+  if(!lyrics?.lines?.length) { for(const display of displays) display.replaceChildren(element('span','subtle',['searching','waiting','processing'].includes(lyricState)?$('lyricsStatus').textContent:'Текст появится автоматически. Свой текст можно добавить через «Текст караоке».')); return; }
+  // Keep a phrase on screen through its trailing pause. Do not advance to a
+  // future line at its predecessor's end; show the next two lines as context.
+  let index=0;
+  for(let at=0;at<lyrics.lines.length;at++){if(lyrics.lines[at].start>time)break;index=at;}
   if(index!==lyricLine) {
     lyricLine=index;
     for(const display of displays) {
@@ -287,9 +292,13 @@ function paintLyrics(time) {
           roles.find(item=>item.id===role).editor.setRange([Math.max(0,word.start-.1),Math.min(project.duration,word.end+.2)]);
           $('recordStatus').textContent='Слово выделено на волне. Нажми кнопку записи.';
         },'lyric-word');
+        if(word.estimated)node.title='Время короткого слова восстановлено приблизительно';
         now.append(node);
       }
-      const following=lyrics.lines[index+1]; display.replaceChildren(now,element('div','lyric-next',following?following.words.map(word=>word.text).join(' '):''));
+      const next=element('div','lyric-next');
+      for(const following of lyrics.lines.slice(index+1,index+3))next.append(element('div','lyric-upcoming',following.words.map(word=>word.text).join(' ')));
+      const previous=lyrics.lines[index-1];
+      display.replaceChildren(element('div','lyric-prev',previous?previous.words.map(word=>word.text).join(' '):''),now,next);
     }
   }
   displays.forEach(display=>[...display.querySelectorAll('.lyric-word')].forEach((node,i)=>{
@@ -318,12 +327,14 @@ async function findLyrics() {
     const candidate=await post('lyrics-find',{artist:$('songArtist').value,title:$('songTitle').value});
     if(current!==projectId) return;
     showSuggestion(candidate);
-    $('lyricsStatus').textContent=suggestion.found?'Текст найден. Проверь название и нажми «Добавить найденный текст».':'Текст не найден. Его можно вставить или загрузить файлом.';
+    $('lyricsStatus').textContent=suggestion.error|| (suggestion.found?'Текст найден и применяется автоматически. Уточняю подсветку…':suggestion.ambiguous?'Несколько похожих песен — уточни исполнителя.':'Текст не найден. Его можно вставить или загрузить файлом.');
+    if(suggestion.found)$('lyricsText').value=suggestion.text;
+    pollProject();
   } catch(error) { if(current===projectId) $('lyricsStatus').textContent=error.message; }
   finally { if(current===projectId) $('findLyrics').disabled=false; }
 }
 $('findLyrics').addEventListener('click',findLyrics);
-$('useLyrics').addEventListener('click',()=>{ $('lyricsText').value=suggestion.text; $('lyricsSuggestion').hidden=true; $('lyricsStatus').textContent='Текст добавлен. Теперь привяжи слова к аудио.'; });
+$('useLyrics').addEventListener('click',()=>{ $('lyricsText').value=suggestion.text; synchronizeLyrics('audio'); });
 $('alignLyrics').addEventListener('click',()=>synchronizeLyrics('audio'));
 $('transcribeLyrics').addEventListener('click',()=>synchronizeLyrics('audio',true));
 $('loadLrc').addEventListener('click',()=>synchronizeLyrics('lrc'));
