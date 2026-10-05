@@ -7,6 +7,18 @@ import app,personalization
 
 
 class PersonalChecks(unittest.TestCase):
+    def test_numeric_rating_uses_only_liked_voice_and_is_reversible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            p=personalization.load(directory);d=[dict(voiced_seconds=10,voice_range_hz=[100,150,250],timbre=[.1,.2,.3,.2,.1,.1])]
+            personalization.rate(p,'one',score=2,reasons=['robotic','pitch_drop'],diagnostics=d)
+            self.assertNotIn('range_hz',p)
+            personalization.rate(p,'one',score=9,reasons=[],diagnostics=d)
+            self.assertEqual(p['range_hz'],[100,250]);self.assertEqual(p['timbre'],d[0]['timbre'])
+            self.assertEqual(p['ratings'][0]['mark'],'good')
+            personalization.rate(p,'one',score=5,reasons=['repeats'],diagnostics=d)
+            self.assertNotIn('timbre',p)
+            for score in (0,11,True):
+                with self.assertRaises(ValueError):personalization.rate(p,'one',score=score,reasons=[])
     def test_observations_deduplicate_ratings_are_reversible_and_disable_preserves_calibration(self):
         with tempfile.TemporaryDirectory() as directory:
             profile=personalization.load(directory)

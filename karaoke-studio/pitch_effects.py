@@ -61,34 +61,16 @@ def analyze_pitch_falls(reference):
             'semitones':trajectory[::2].tolist()+[float(trajectory[-1])],
             'formant_amount':float(np.clip(shift/trajectory[-1],0,1)),
             'confidence':round(similarity,3),'type':'estimated_pitch_fall'})
-    # Fast processed dives can lose periodicity in the middle. Offer an estimate
-    # only when both pitched endpoints and a downward spectral shift agree.
-    indexes=np.flatnonzero(voiced)
-    groups=np.split(indexes,np.flatnonzero(np.diff(indexes)>5)+1)
-    for first,last in zip(groups,groups[1:]):
-        if len(first)<3 or len(last)<3:continue
-        a=first[-min(6,len(first)):];b=last[:min(7,len(last))]
-        gap=float(times[b[0]]-times[a[-1]])
-        if not .07<gap<.2:continue
-        base=float(np.median(pitch[a]));ending=float(np.median(pitch[b]))
-        drop=float(12*np.log2(ending/base))
-        start=float(times[a[0]]);end=float(times[b[-1]])
-        if not -24<drop<-8 or end-start>.45:continue
-        shape=_formant_shift(x,pitch,times,start,end)
-        if shape is None:continue
-        shift,similarity,improvement=shape
-        if shift>-2 or similarity<.25 or improvement<.1:continue
-        if any(event['start']<=end and event['end']>=start for event in events):continue
-        points=np.r_[a,b];curve=12*np.log2(pitch[points]/base);curve=np.minimum.accumulate(np.minimum(curve,0))
-        events.append({'start':start,'end':end,'times':times[points].tolist(),'semitones':curve.tolist(),
-            'formant_amount':float(np.clip(shift/drop,0,1)), 'confidence':round(similarity,3),
-            'type':'estimated_pitch_fall','uncertain_middle':True})
+    # Disconnected endpoints cannot distinguish an effect from an octave tracking
+    # error. Do not invent a trajectory through an unvoiced gap.
     return sorted(events,key=lambda event:event['start'])
+
 
 
 def render_pitch_falls(voice,events,profile=None):
     output=np.asarray(voice,np.float32).copy()
     for event in events:
+        if event.get('uncertain_middle'):continue  # Also protect legacy approvals.
         lo=max(0,round((event['start']-.18)*RATE));hi=min(len(output),round((event['end']+.06)*RATE))
         x=np.ascontiguousarray(output[lo:hi],dtype=np.float64)
         if len(x)<RATE//5 or np.max(abs(x))<1e-7:continue
@@ -133,7 +115,7 @@ def analyze_stutters(reference):
             dot=correlate(part,template,mode='valid',method='fft')
             energy=np.sqrt(np.maximum(np.convolve(part**2,np.ones(length),'valid'),0)*np.sum(template**2))
             scores.append(float(np.max(dot/(energy+1e-10))))
-        return float(np.median(scores)) if sum(score>.8 for score in scores)>=5 else 0
+        return float(np.median(scores)) if scores and min(scores)>.8 else 0
     def signature(at):
         clip=x[max(0,round((at-.025)*RATE)):min(len(x),round((at+.07)*RATE))][::4]
         if len(clip)<128:return None
@@ -142,21 +124,31 @@ def analyze_stutters(reference):
         bands=np.array([np.mean(spectrum[(freq>=a)&(freq<b)]) for a,b in zip(np.geomspace(100,5000,13)[:-1],np.geomspace(100,5000,13)[1:])])
         return bands/(np.linalg.norm(bands)+1e-9)
     events=[]
-    for index in range(len(peaks)-7):
-        points=peaks[index:index+8]*.01;gaps=np.diff(points)
-        early=float(np.median(gaps[:2]));late=float(np.median(gaps[-3:]))
-        if not .08<=late<=.2 or early<late*1.5 or points[-1]-points[0]>3:continue
+    for index in range(len(peaks)-3):
+        points=peaks[index:index+4]*.01;gaps=np.diff(points)
+        early=float(gaps[0]);late=float(gaps[-1])
+        if np.min(gaps)<.06 or np.max(gaps)>.65 or points[-1]-points[0]>2:continue
         vectors=[signature(at) for at in points]
         if any(v is None for v in vectors):continue
         similarities=np.array([np.dot(vectors[0],v) for v in vectors[1:]])
-        if np.count_nonzero(similarities>.82)<5:continue
+        if np.min(similarities)<.85:continue
         copied=repeated_wave(np.maximum(0,points-.04))
-        if copied<.82:continue
+        if copied<.85:continue
+        # Extend to the last matching attack, including steady and accelerating
+        # chains. Never hard-code the number of copies.
+        for peak in peaks[index+4:]:
+            candidate=peak*.01
+            gap=candidate-points[-1]
+            if gap<.06 or gap>min(.65,max(np.diff(points))*1.35) or candidate-points[0]>8:break
+            vector=signature(candidate)
+            if vector is None or np.dot(vectors[0],vector)<.85 or repeated_wave(np.maximum(0,np.r_[points[0],candidate]-.04))<.85:break
+            points=np.r_[points,candidate]
+        late=float(np.diff(points)[-1])
         start=float(max(0,points[0]-.04));end=float(min(len(x)/RATE,points[-1]+late))
         if events and start<events[-1]['end']:continue
         events.append({'type':'estimated_stutter','start':start,'end':end,
             'onsets':np.maximum(0,points-.04).tolist(),'template_start':start,
-            'template_end':start+min(early,.3), 'confidence':copied})
+            'template_end':start+min(early,.3), 'repeat_count':len(points), 'confidence':copied})
     return events
 
 
@@ -166,6 +158,15 @@ def render_stutters(voice,events):
         start=round(event['start']*RATE);end=min(len(output),round(event['end']*RATE))
         a=round(event['template_start']*RATE);b=min(len(output),round(event['template_end']*RATE))
         template=output[a:b].copy()
+        # The user may already have sung a-a-a: retain one attack only. This
+        # template and the entire original event are replaced, never summed.
+        from scipy.signal import find_peaks
+        size=220
+        envelope=np.sqrt(np.mean(np.pad(template**2,(0,(-len(template))%size)).reshape(-1,size),axis=1)+1e-12)
+        attacks,_=find_peaks(envelope,prominence=max(.002,float(np.max(envelope))*.25),distance=11)
+        if len(attacks)>1:
+            cut=(attacks[1]-2)*size
+            if cut>RATE*.04:template=template[:cut]
         if len(template)<RATE*.04 or np.max(abs(template))<1e-7 or end<=start:continue
         replacement=np.zeros(end-start,np.float32);points=event['onsets']+[event['end']]
         for at,stop in zip(points[:-1],points[1:]):

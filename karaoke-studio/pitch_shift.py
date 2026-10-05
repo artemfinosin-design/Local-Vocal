@@ -37,6 +37,15 @@ def shift_waveform(voice, pitch, times, correction, reliable):
             position=float(a+np.argmax(filtered[a:b]));epochs.append(position)
         epochs=np.asarray(epochs)
         if len(epochs)<5:continue
+        # Periodic confidence alone can accept growl/breathy or doubled audio.
+        # PSOLA needs repeatable pulses: leave incoherent regions untouched.
+        similarity=[]
+        for one,two in zip(epochs[:-1:3],epochs[1::3]):
+            half=round(min(RATE/frequency(one),RATE/frequency(two))*.45)
+            a=voice[max(0,round(one)-half):round(one)+half]
+            b=voice[max(0,round(two)-half):round(two)+half]
+            if len(a)==len(b) and len(a):similarity.append(float(np.dot(a,b)/(np.linalg.norm(a)*np.linalg.norm(b)+1e-12)))
+        if not similarity or np.median(similarity)<.65:continue
         changed=np.zeros(hi-lo,np.float64);weights=np.zeros(hi-lo,np.float64)
         position=epochs[0];index=0
         while position<epochs[-1]:

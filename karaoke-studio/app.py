@@ -124,7 +124,7 @@ def restore_jobs():
                 save_guides(folder, meta)
                 jobs[folder.name] = job
                 save_job(folder.name,touch=False)
-                if (job.get('version', 2) < 3 or meta.get('version', 0) < 11) and all((folder / (name + '.wav')).is_file() for name in ('lead','backing')):
+                if (job.get('version', 2) < 3 or meta.get('version', 0) < 12) and all((folder / (name + '.wav')).is_file() for name in ('lead','backing')):
                     outdated.append(folder.name)
         except (OSError, ValueError, TypeError):
             continue
@@ -545,9 +545,9 @@ class Handler(BaseHTTPRequestHandler):
                 with lock:
                     if render_id not in job.get('renders',[]) or render_id not in job.get('render_diagnostics',{}):raise ValueError('Сначала собери песню в новой версии')
                     personal=personalization.load(DATA)
-                    personalization.rate(personal,job_id+':'+render_id,settings.get('rating'))
+                    personalization.rate(personal,job_id+':'+render_id,settings.get('rating'),settings.get('score'),settings.get('reasons'),job['render_diagnostics'][render_id].get('voices'))
                     personalization.save(DATA,personal)
-                    job.setdefault('render_ratings',{})[render_id]=settings['rating'];save_job(job_id)
+                    job.setdefault('render_ratings',{})[render_id]=dict(personal['ratings'][-1]);save_job(job_id)
                 return self.reply(200,personalization.summarize(personal))
             if parsed.path == '/api/voice-profile':
                 settings = json.loads(self.request_body(1000))
@@ -805,7 +805,7 @@ class Handler(BaseHTTPRequestHandler):
                     personalization.observe(personal,example,diagnostics,dict(saved_at=int(datetime.now(timezone.utc).timestamp()*1000),mode=tune_mode,settings=tune_settings,autotune=autotune,space=space,vocal_db=vocal_db,pitch_falls=pitch_falls))
                     personalization.save(DATA,personal)
                     save_job(job_id)
-                return self.reply(200, {"url": f"/api/audio?id={job_id}&name={render_id}",'render_id':render_id})
+                return self.reply(200, {"url": f"/api/audio?id={job_id}&name={render_id}",'render_id':render_id,'diagnostics':jobs[job_id]['render_diagnostics'][render_id]})
             self.reply(404, {"error": "Не найдено"})
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
             self.reply(400, {"error": str(exc)})

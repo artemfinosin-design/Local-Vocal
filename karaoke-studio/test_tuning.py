@@ -7,6 +7,24 @@ from voice import tuning_options,tuning_profile
 import app
 
 class TuningChecks(unittest.TestCase):
+    def test_register_change_does_not_drag_high_voice_down_an_octave(self):
+        from voice import track_pitch
+        t=np.arange(RATE*4)/RATE;hz=np.where(t<2,220,440)
+        user=(.1*np.sin(2*np.pi*np.cumsum(hz)/RATE)).astype(np.float32)
+        ref=(.1*np.sin(2*np.pi*440*t)).astype(np.float32)
+        result=pitch_match(user,ref,mode='melody',settings={'voice_type':'wide'})
+        f,at,c=track_pitch(result);good=(at>2.5)&(at<3.5)&(f>0)
+        self.assertGreater(float(np.median(f[good])),420)
+    def test_report_is_raw_octave_equivalent_and_available_without_tuning(self):
+        logs=[];v=self.tone(220);r=self.tone(440)
+        np.testing.assert_array_equal(pitch_match(v,r,settings={'strength':0},diagnostics=logs),v)
+        self.assertGreater(logs[0]['performance']['hit_percent'],95)
+        self.assertEqual(len(logs[0]['timbre']),6)
+        logs=[];pitch_match(v,self.tone(225),mode='hard',diagnostics=logs)
+        self.assertAlmostEqual(logs[0]['performance']['median_cents'],38.9,delta=4)
+        t=np.arange(RATE*3)/RATE;hz=220*2**(np.sin(2*np.pi*5*t)/12)
+        changing=(.1*np.sin(2*np.pi*np.cumsum(hz)/RATE)).astype(np.float32)
+        np.testing.assert_array_equal(pitch_match(changing,r,mode='hard',settings={'strength':0}),changing)
     def test_waveform_shift_has_no_periodic_volume_dips_or_chunk_seams(self):
         t=np.arange(RATE*8)/RATE
         voice=(.1*np.sin(2*np.pi*220*t)+.04*np.sin(2*np.pi*440*t)).astype(np.float32)

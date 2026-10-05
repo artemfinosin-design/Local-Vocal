@@ -32,6 +32,7 @@ def processing_profile(calibration,personal):
     if personal['enabled']:
         result.update(adaptive_speed_ms=personal.get('speed_ms',20),
                       adaptive_confidence=personal.get('confidence',.6),adaptive_revision=personal['revision'])
+        if personal.get('timbre'):result['adaptive_timbre']=personal['timbre']
         if personal.get('range_hz'):
             low,high=personal['range_hz']
             result['low_hz']=min(result.get('low_hz',low),low)
@@ -48,19 +49,35 @@ def observe(profile,identity,diagnostics,preferences):
                 high=max(d['voice_range_hz'][2] for d in valid),seconds=sum(d['voiced_seconds'] for d in valid),
                 confidence=sum(d.get('median_confidence',.85) for d in valid)/len(valid)))
             profile['observations']=profile['observations'][-100:]
-            items=profile['observations'];total=sum(min(d['seconds'],120) for d in items)
-            profile['range_hz']=[sum(d[k]*min(d['seconds'],120) for d in items)/total for k in ('low','high')]
-            average=sum(d.get('confidence',.85)*min(d['seconds'],120) for d in items)/total
-            profile['base_confidence']=min(.7,max(.6,average-.25))
-            profile['confidence']=min(.78,profile['base_confidence']+.025*sum(r['rating']=='wrong_notes' for r in profile['ratings'][-10:]))
     profile['preferences']=preferences
     profile['revision']+=1
 
 
-def rate(profile,identity,rating):
-    if rating not in {'good','robotic','wrong_notes'}:raise ValueError('Неизвестная оценка звучания')
+REASONS={'robotic','wrong_notes','pitch_drop','repeats','effects','volume','timing'}
+
+
+def rate(profile,identity,rating=None,score=None,reasons=None,diagnostics=None):
+    if score is None:
+        if rating not in {'good','robotic','wrong_notes'}:raise ValueError('Неизвестная оценка звучания')
+        score=9 if rating=='good' else 3;reasons=[] if rating=='good' else [rating]
+    if type(score) is not int or not 1<=score<=10:raise ValueError('Оценка должна быть от 1 до 10')
+    if not isinstance(reasons,list) or any(not isinstance(r,str) or r not in REASONS for r in reasons) or len(reasons)>len(REASONS):raise ValueError('Неизвестная причина оценки')
+    reasons=list(dict.fromkeys(reasons));good=score>=8 and not reasons
+    rating='good' if good else 'robotic' if 'robotic' in reasons else 'wrong_notes' if {'wrong_notes','pitch_drop'}&set(reasons) else 'needs_work'
     profile['ratings']=[r for r in profile['ratings'] if r['id']!=identity]
-    profile['ratings'].append(dict(id=identity,rating=rating));profile['ratings']=profile['ratings'][-100:]
+    item=dict(id=identity,rating=rating,score=score,reasons=reasons,mark='good' if good else 'needs_work')
+    valid=[d for d in diagnostics or [] if d.get('voiced_seconds',0)>=2 and len(d.get('voice_range_hz',[]))==3]
+    if valid:item['voice']=[dict(range_hz=d['voice_range_hz'],timbre=d.get('timbre',[]),confidence=d.get('median_confidence',.85)) for d in valid]
+    profile['ratings'].append(item);profile['ratings']=profile['ratings'][-100:]
+    # Learn voice traits only from explicitly liked examples, never from a bad
+    # render merely because it was generated. Changing a rating undoes learning.
+    accepted=[v for r in profile['ratings'] if r.get('mark')=='good' for v in r.get('voice',[])]
+    profile.pop('range_hz',None);profile.pop('timbre',None)
+    if accepted:
+        profile['range_hz']=[sum(v['range_hz'][i] for v in accepted)/len(accepted) for i in (0,2)]
+        tones=[v['timbre'] for v in accepted if len(v['timbre'])==6]
+        if tones:profile['timbre']=[sum(t[i] for t in tones)/len(tones) for i in range(6)]
+        profile['base_confidence']=min(.7,max(.6,sum(v['confidence'] for v in accepted)/len(accepted)-.25))
     # Recompute from the latest feedback, so changing a rating undoes its influence.
     recent=profile['ratings'][-10:]
     profile['speed_ms']=min(220,90+30*sum(r['rating']=='robotic' for r in recent)) if any(r['rating']=='robotic' for r in recent) else 20

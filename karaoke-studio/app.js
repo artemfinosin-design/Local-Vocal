@@ -62,7 +62,7 @@ async function upload(file) {
 function resetProject() {
   stopPreview();pauseAll();roles.forEach(role=>role.editor?.dispose());clearTimeout(pollTimer);
   projectId=null;project=null;roles=[];analysisPending=false;lyrics=null;lyricLine=-2;suggestion=null;
-  for(const id of ['roles','takeLibrary','markers','effectProposalList'])$(id).replaceChildren();
+  for(const id of ['roles','takeLibrary','mixDelays','markers','effectProposalList'])$(id).replaceChildren();
   document.querySelectorAll('audio').forEach(audio=>{audio.removeAttribute('src');audio.load();});
   document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());
   $('file').value='';$('lyricsText').value='';$('songArtist').value='';$('songTitle').value='';
@@ -106,7 +106,7 @@ function pollProject() {
 }
 function showProject(state) {
   project=state; $('uploadCard').classList.remove('working'); $('status').textContent=`Открыта песня «${state.filename||'Сохранённый проект'}» · ${seconds(state.duration)}. Нажми «Дальше».`;
-  roles.forEach(role=>role.editor?.dispose()); $('roles').replaceChildren(); $('takeLibrary').replaceChildren(); roles=state.roles.map(role=>({...role}));
+  roles.forEach(role=>role.editor?.dispose()); $('roles').replaceChildren(); $('takeLibrary').replaceChildren(); $('mixDelays').replaceChildren(); roles=state.roles.map(role=>({...role}));
   $('instrumental').src=audioUrl('instrumental'); $('vocals').src=audioUrl('vocals');
   $('songArtist').value=state.song_info?.artist||''; $('songTitle').value=state.song_info?.title||'';
   if(state.lyrics_candidate) showSuggestion(state.lyrics_candidate);
@@ -118,7 +118,7 @@ function showProject(state) {
   for (const marker of state.markers.slice(0,24)) chips.append(element('span','chip',`${seconds(marker.time)} · ${marker.tags.join(', ')}`));
   $('markers').replaceChildren(chips); $('resultBox').hidden=!state.renders?.length;
   if (state.renders?.length) { $('result').src=audioUrl(state.renders.at(-1)); $('download').href=$('result').src; }
-  window.showRenderFeedback?.(state.renders?.at(-1),!!state.render_diagnostics?.[state.renders?.at(-1)]); window.studioFlow.ready(roles,!!state.renders?.length); window.loadEffectProposals?.(); syncControls();
+  window.showRenderFeedback?.(state.renders?.at(-1),!!state.render_diagnostics?.[state.renders?.at(-1)],state.render_diagnostics?.[state.renders?.at(-1)],state.render_ratings?.[state.renders?.at(-1)]); window.studioFlow.ready(roles,!!state.renders?.length); window.loadEffectProposals?.(); syncControls();
 }
 function activeTakes(role) {
   const latest=new Map();
@@ -135,6 +135,8 @@ function buildRole(role) {
   paintTakes(role);
 }
 function paintTakes(role) {
+  document.querySelectorAll('#mixDelays [data-role]').forEach(node=>{if(node.dataset.role===role.id)node.remove();});
+  const delays=element('section','mix-delay-role');delays.dataset.role=role.id;delays.append(element('strong','',role.name));$('mixDelays').append(delays);
   role.clipBox.replaceChildren(); role.takes=activeTakes(role);
   if(!role.takes.length)role.clipBox.append(element('p','subtle','Пока нет записей для этой партии.'));
   for (const take of role.takes) {
@@ -147,7 +149,11 @@ function paintTakes(role) {
     offset.id='offset-'+take.id;offset.setAttribute('aria-label','Задержка дубля');
     const value=element('output','offset-value');const current=projectId;
     const update=()=>{value.textContent=`${Number(offset.value)>0?'+':''}${Math.round(Number(offset.value)*1000)} мс`;localStorage.setItem('offset-'+current+'-'+take.id,offset.value);};update();offset.addEventListener('input',()=>{update();window.studioFlow.dirty();});
-    take.offsetInput=offset;label.append(offset,value); box.append(label,button('▶ Проверить с музыкой',event=>previewTake(take,event.currentTarget))); role.clipBox.append(box);
+    take.offsetInput=offset;label.append(offset,value);const delay=element('div','mix-delay-take');delay.append(element('span','subtle',`${seconds(range[0],true)} — ${seconds(range[1],true)}`),label,button('▶ Проверить с музыкой',event=>previewTake(take,event.currentTarget)));
+    const seekDetails=element('details','delay-seek'),seekLabel=element('label','control','Момент проверки'),seek=element('input');
+    Object.assign(seek,{type:'range',min:range[0],max:Math.max(range[0],range[1]-.1),step:.1,value:Math.max(range[0],Math.min(range[1]-.1,role.segments.find(s=>s[1]>range[0]&&s[0]<range[1])?.[0]??range[0]))});
+    seek.setAttribute('aria-label','Момент проверки задержки');const seekValue=element('output','subtle');seekValue.textContent=seconds(Number(seek.value),true);seek.addEventListener('input',()=>seekValue.textContent=seconds(Number(seek.value),true));take.previewSeek=seek;
+    seekLabel.append(seek,seekValue);seekDetails.append(element('summary','','Выбрать момент проверки'),seekLabel);delay.append(seekDetails);delays.append(delay);role.clipBox.append(box);
   }
   role.editor?.refresh();
 }
@@ -162,7 +168,7 @@ function stopPreview() {
   previewGeneration++; clearTimeout(previewTimer);
   for (const node of previewNodes) { try { node.stop(); } catch{} node.disconnect(); }
   previewNodes=[];
-  for (const control of document.querySelectorAll('.clip .preview-button')) { control.textContent='▶ Проверить с музыкой'; control.disabled=busy(); }
+  for (const control of document.querySelectorAll('.mix-delay-take .preview-button')) { control.textContent='▶ Проверить с музыкой'; control.disabled=busy(); }
 }
 async function previewTake(take, control) {
   if (busy()) return;
@@ -178,13 +184,13 @@ async function previewTake(take, control) {
     if (generation!==previewGeneration || current!==projectId || busy()) return;
     const offset=Number(take.offsetInput.value);
     if (!Number.isFinite(offset)||Math.abs(offset)>5) throw new Error('Задержка должна быть от −5 до +5 секунд');
-    const range=take.region||[0,project.duration], seek=Math.max(0,range[0]-.5), voiceSeek=seek-(take.start||0)-offset;
+    const range=take.region||[0,project.duration], seek=Math.max(0,Number(take.previewSeek?.value??range[0])-.5), voiceSeek=seek-(take.start||0)-offset;
     const length=Math.min(15,range[1]-seek+.5,buffers[0].duration-seek), at=previewContext.currentTime+.1;
     const music=previewContext.createBufferSource(), voice=previewContext.createBufferSource();
     music.buffer=buffers[0]; voice.buffer=buffers[1]; music.connect(previewGain); voice.connect(previewGain); music.start(at,seek,length);
     if (Math.max(0,voiceSeek)<voice.buffer.duration) voice.start(at+Math.max(0,-voiceSeek),Math.max(0,voiceSeek),length);
     previewNodes=[music,voice]; control.textContent='■ Остановить проверку'; previewTimer=setTimeout(stopPreview,(length+.3)*1000);
-  } catch(error) { if (generation===previewGeneration) { stopPreview(); $('recordStatus').textContent=error.message; } }
+  } catch(error) { if (generation===previewGeneration) { stopPreview(); $(window.studioStage?.stage==='mix'?'renderStatus':'recordStatus').textContent=error.message; } }
   finally { if (generation===previewGeneration) { control.disabled=busy(); if (!previewNodes.length) control.textContent='▶ Проверить с музыкой'; } }
 }
 const pauseFor = ms => new Promise(resolve=>setTimeout(resolve,ms));
@@ -256,7 +262,7 @@ async function render() {
   stopPreview(); pauseAll(); rendering=true; syncControls(); $('renderStatus').textContent='Собираю фрагменты, выравниваю громкость и применяю обработку…';
   try {
     const result=await post('render',{tracks,autotune:$('autotune').checked,tune_mode:$('tuneMode').value,tune_settings:window.tuneSettings?.(),pitch_falls:$('pitchFalls').checked,vocal_db:Number($('vocalGain').value),space:$('space').value});
-    window.showRenderFeedback?.(result.render_id,true); window.loadPersonalProfile?.(); $('result').src=result.url; $('download').href=result.url; $('resultBox').hidden=false; window.studioFlow.result(); $('renderStatus').textContent='Готово. Нажми «Перейти к прослушиванию».';
+    window.showRenderFeedback?.(result.render_id,true,result.diagnostics); window.loadPersonalProfile?.(); $('result').src=result.url; $('download').href=result.url; $('resultBox').hidden=false; window.studioFlow.result(); $('renderStatus').textContent='Готово. Нажми «Перейти к прослушиванию».';
   } catch(error) { $('renderStatus').textContent=error.message; }
   finally { rendering=false; syncControls(); }
 }

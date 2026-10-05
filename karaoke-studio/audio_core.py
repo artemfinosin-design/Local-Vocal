@@ -240,7 +240,7 @@ def analyze(vocals, backing=None, full_vocals=None):
             identity=f"{reference}:{event['type']}:{event['start']:.2f}:{event['end']:.2f}"
             event.update(id=hashlib.sha256(identity.encode()).hexdigest()[:24],reference=reference,status='pending')
             proposals.append(event)
-    return {"effect_proposals":proposals, "version": 11, "effect_version": 3, "hop": HOP / RATE, "profiles": profiles, "roles": roles}
+    return {"effect_proposals":proposals, "version": 12, "effect_version": 4, "hop": HOP / RATE, "profiles": profiles, "roles": roles}
 
 
 def markers(meta):
@@ -273,29 +273,39 @@ def markers(meta):
     return found[:80]
 
 
-def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, diagnostics=None):
+def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, diagnostics=None, excluded=None):
     """Correct trusted voiced regions while keeping the recorded waveform."""
     from scipy.ndimage import median_filter
     from pitch_shift import shift_waveform
     options=tuning_options(mode,settings)
     profile=tuning_profile(profile,options['voice_type'])
-    if options['strength']==0 or len(voice)<RATE//5 or np.max(abs(voice))<1e-7:return voice
+    if len(voice)<RATE//5 or np.max(abs(voice))<1e-7:return voice
     user,times,confidence=track_pitch(voice,profile)
     source,source_times,source_confidence=track_pitch(reference)
     source=np.interp(times,source_times,source)
     source_confidence=np.interp(times,source_times,source_confidence)
     threshold=float((profile or {}).get('adaptive_confidence',.6))
     paired=(user>0)&(source>0)&(confidence>threshold)&(source_confidence>.65)
+    for start,end in excluded or []:paired[(times>=start)&(times<=end)]=False
+    raw_distance=np.zeros_like(user)
+    raw_distance[paired]=12*np.log2(source[paired]/user[paired])
     octave=round(float(np.median(np.log2(source[paired]/user[paired])))) if np.any(paired) else 0
     if options['quantize']:
         active=source>0
         source[active]=440*2**((np.round(69+12*np.log2(source[active]/440))-69)/12)
     distance=np.zeros_like(user)
     distance[paired]=12*np.log2(source[paired]/user[paired])-12*octave
+    # Sustained octave discrepancies are register changes or tracking errors,
+    # never permission to drag the singer down twelve semitones. A tritone
+    # crossing remains a melody correction, with no nearest-octave flips.
+    far=paired&(abs(distance)>9)
+    edges=np.diff(np.r_[False,far,False].astype(int))
+    for lo,hi in zip(np.flatnonzero(edges==1),np.flatnonzero(edges==-1)):
+        if hi-lo>=15:distance[lo:hi]-=12*round(float(np.median(distance[lo:hi]))/12)
     stable=median_filter(distance,size=3,mode='nearest')
     source_notes=12*np.log2(np.maximum(source,1))
     reference_stable=abs(source_notes-median_filter(source_notes,size=5,mode='nearest'))<.45
-    reliable=paired&reference_stable&(abs(distance-stable)<1.5)&(abs(stable)<options['max_semitones'])
+    reliable=paired&reference_stable&(abs(distance-stable)<1.5)&(abs(distance)<=9)&(abs(stable)<options['max_semitones'])
     edges=np.diff(np.r_[False,reliable,False].astype(int))
     for lo,hi in zip(np.flatnonzero(edges==1),np.flatnonzero(edges==-1)):
         if hi-lo<4:reliable[lo:hi]=False
@@ -306,11 +316,14 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
     response=1-np.exp(-10/speed);user_notes=12*np.log2(np.maximum(user,1))
     for i in range(len(correction)):
         if not reliable[i]:current=None;continue
-        if desired[i]==0:current=user_notes[i];continue
-        target_note=user_notes[i]+desired[i]
-        if current is None:current=user_notes[i]
-        current+=(target_note-current)*response
-        correction[i]=current-user_notes[i]
+        if current is None:current=0 if not options['quantize'] else user_notes[i]
+        if options['quantize']:
+            current+=(user_notes[i]+desired[i]-current)*response
+            correction[i]=current-user_notes[i]
+        else:
+            current+=(desired[i]-current)*response
+            correction[i]=current
+    if options['strength']==0:correction.fill(0)
     correction[abs(correction)<.02]=0
     result,processed=shift_waveform(voice,user,times,correction,reliable)
     if diagnostics is not None:
@@ -325,10 +338,38 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
             'correction_cents':np.percentile(abs(correction[reliable])*100,[50,90]).tolist() if np.any(reliable) else [],
             'input_rms':float(np.sqrt(np.mean(np.asarray(voice,dtype=float)**2))),
             'profile_revision':int((profile or {}).get('adaptive_revision',0))})
+        diagnostics[-1]['performance']=performance_report(raw_distance,paired,times)
+        diagnostics[-1]['timbre']=voice_timbre(voice)
     return result
 
 
-def _tone_match(voice, reference, mask):
+def performance_report(distance,paired,times):
+    """Raw aligned singing, before correction; octave-equivalent notes allowed."""
+    error=abs((distance+6)%12-6)*100
+    count=int(np.count_nonzero(paired))
+    report=dict(compared_seconds=round(count*.01,2),tolerance_cents=50,
+                coverage_percent=round(100*count/max(1,len(times)),1),segments=[])
+    if count<100:return report
+    report.update(hit_percent=round(float(np.mean(error[paired]<=50))*100,1),
+                  median_cents=round(float(np.median(error[paired])),1))
+    for start in np.arange(0,times[-1],5):
+        mask=paired&(times>=start)&(times<start+5)
+        if np.count_nonzero(mask)>=50:report['segments'].append(dict(start=float(start),end=float(min(start+5,times[-1])),hit_percent=round(float(np.mean(error[mask]<=50))*100,1)))
+    return report
+
+
+def voice_timbre(voice):
+    # Bounded spectral proportions, not a biometric identity or plugin model.
+    frames=np.asarray(voice[:len(voice)//2048*2048]).reshape(-1,2048)[::4]
+    if not len(frames):return []
+    rms=np.sqrt(np.mean(frames**2,axis=1));frames=frames[rms>max(.005,float(np.percentile(rms,85))*.25)]
+    if not len(frames):return []
+    power=abs(np.fft.rfft(frames*np.hanning(2048),axis=1))**2
+    hz=np.fft.rfftfreq(2048,1/RATE);bands=[np.sum(power[:,(hz>=a)&(hz<b)],axis=1) for a,b in zip([80,250,500,1000,2000,4000],[250,500,1000,2000,4000,8000])]
+    mean=np.mean(bands,axis=1);return (mean/(np.sum(mean)+1e-12)).tolist()
+
+
+def _tone_match(voice, reference, mask, personal=None):
     """Match broad brightness, with tight limits to avoid extreme EQ."""
     def lowpass(samples):
         width = 25
@@ -341,7 +382,10 @@ def _tone_match(voice, reference, mask):
         return voice
     def balance(full, low):
         return np.sqrt(np.mean((full[selected] - low[selected]) ** 2)) / (np.sqrt(np.mean(low[selected] ** 2)) + 1e-5)
-    tilt = np.clip(balance(reference, reference_low) / (balance(voice, voice_low) + 1e-5), 0.65, 1.6)
+    # Liked examples identify a voice to preserve. Bound the reference EQ more
+    # tightly instead of colouring a familiar timbre aggressively.
+    limits=(.85,1.18) if (personal or {}).get('adaptive_timbre') else (.65,1.6)
+    tilt = np.clip(balance(reference, reference_low) / (balance(voice, voice_low) + 1e-5), *limits)
     return voice_low + (voice - voice_low) * tilt
 
 
@@ -452,13 +496,17 @@ def mix(instrumental, references, tracks, meta, autotune=True, vocal_db=0, space
         # A detector is a recording guide, not permission to delete a sung phrase.
         # Explicit user exclusions and selected clip regions still apply.
         aligned *= exclusion_envelope(role, total)
-        if autotune:
-            pitch_source = references.get('lead') if role_id != 'backing' else None
-            if pitch_source is not None:
-                pitch_source = np.mean(pitch_source, axis=1)
-                pitch_source = np.pad(pitch_source[:total], (0, max(0, total-len(pitch_source))))
-            aligned = pitch_match(aligned, pitch_source if pitch_source is not None else source, voice_profile, tune_mode, tune_settings, diagnostics)
-        aligned = vocal_dynamics(_tone_match(aligned, source, sample_mask))
+        pitch_source = references.get('lead') if role_id != 'backing' else None
+        if pitch_source is not None:
+            pitch_source = np.mean(pitch_source, axis=1)
+            pitch_source = np.pad(pitch_source[:total], (0, max(0, total-len(pitch_source))))
+        excluded=[(event['start'],event['end']) for event in meta.get('effect_proposals',[]) if 'start' in event and 'end' in event and event['reference']==role['reference'] and event['type'] in {'estimated_stutter','estimated_pitch_fall'} and event.get('status')=='approved']
+        before=len(diagnostics) if diagnostics is not None else 0
+        options=dict(tune_settings or {})
+        if not autotune:options['strength']=0
+        aligned = pitch_match(aligned,pitch_source if pitch_source is not None else source,voice_profile,tune_mode,options,diagnostics,excluded)
+        if diagnostics is not None and len(diagnostics)>before:diagnostics[-1]['role']=role_id
+        aligned = vocal_dynamics(_tone_match(aligned, source, sample_mask, voice_profile))
         if pitch_falls:
             approved=[event for event in meta.get('effect_proposals',[]) if event.get('status')=='approved' and event['reference']==role['reference']]
             aligned = render_pitch_falls(aligned,[event for event in approved if event['type']=='estimated_pitch_fall'],voice_profile)

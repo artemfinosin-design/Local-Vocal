@@ -40,7 +40,7 @@ class RoleChecks(unittest.TestCase):
                 time.sleep(.02)
             self.assertEqual(app.jobs[identity]['analysis_state'],'ready')
             refreshed=json.loads((folder/'analysis.json').read_text(encoding='utf-8'))
-            self.assertEqual(refreshed['version'],11)
+            self.assertEqual(refreshed['version'],12)
             self.assertEqual(refreshed['roles'][0]['excluded'],[[0,.5]])
             self.assertEqual(len(app.jobs[identity]['tracks']),1)
             self.assertEqual(app.jobs[identity]['renders'],[render])

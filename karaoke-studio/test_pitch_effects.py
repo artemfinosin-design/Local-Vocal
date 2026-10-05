@@ -23,6 +23,20 @@ def slide(tape=True):
     x*=.15/max(abs(x));return x.astype(np.float32)
 
 class FallChecks(unittest.TestCase):
+    def test_legacy_uncertain_drop_is_not_rendered(self):
+        v=slide(False)
+        np.testing.assert_array_equal(render_pitch_falls(v,[dict(uncertain_middle=True)]),v)
+    def test_complete_regular_repeat_chain_and_user_repeats_are_replaced(self):
+        rng=np.random.default_rng(35);template=rng.normal(0,.05,round(.09*RATE)).astype(np.float32)*np.hanning(round(.09*RATE))
+        reference=np.zeros(RATE*5,np.float32);points=np.arange(.5,3.6,.25)
+        for at in points:
+            lo=round(at*RATE);reference[lo:lo+len(template)]=template
+        events=analyze_stutters(reference)
+        self.assertEqual(len(events),1);self.assertEqual(events[0]['repeat_count'],len(points))
+        user=reference.copy();user[round(1.8*RATE):round(1.95*RATE)]=.3
+        result=render_stutters(user,events)
+        self.assertLess(float(np.max(abs(result[round(1.85*RATE):round(1.9*RATE)]))),.2)
+        np.testing.assert_array_equal(result[round(events[0]['end']*RATE):],user[round(events[0]['end']*RATE):])
     def test_copied_syllables_detected_but_independent_syllables_are_not(self):
         rng=np.random.default_rng(17)
         count=round(.095*RATE);t=np.arange(count)/RATE
