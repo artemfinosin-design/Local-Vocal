@@ -39,7 +39,7 @@ def impulse(rate, decay, predelay=.025):
 def spatial(voice, rate, room=0, decay=.8, delay_wet=0, delay=.28, width=0):
     """Wet sends only. All delayed repeats are fed from the original signal."""
     voice = np.asarray(voice, np.float32)
-    tail = round(rate * max(decay + .12 if room else 0, delay * 6 if delay_wet else 0, .024))
+    tail = round(rate * max(decay + .12 if room else 0, delay * 6 if delay_wet else 0, .24 if width else .024))
     output = np.zeros((len(voice) + tail, 2), np.float32)
     if room > 0:
         ir = impulse(rate, round(float(decay), 2))
@@ -54,9 +54,12 @@ def spatial(voice, rate, room=0, decay=.8, delay_wet=0, delay=.28, width=0):
             if stop > at:
                 output[at:stop, repeat % 2] += damped[:stop-at] * delay_wet * .42 ** (repeat-1)
     if width > 0:
-        at = round(.019 * rate)
-        output[at:at+len(voice), 0] += voice * width * .12
-        output[at:at+len(voice), 1] -= voice * width * .12
+        # One opposite-polarity 19ms copy creates comb-filter coloration in each
+        # ear. Use a short diffuse side field; mono sum still preserves dry voice.
+        ir=impulse(rate,.18,predelay=.008)
+        side_ir=(ir[:,0]-ir[:,1])*.5
+        side=oaconvolve(voice,side_ir)*width*.18
+        stop=min(len(output),len(side));output[:stop,0]+=side[:stop];output[:stop,1]-=side[:stop]
     return output
 
 
@@ -221,6 +224,24 @@ def analyze_effects(samples):
     for at in range(0, len(samples), RATE * 4):
         part = samples[max(0, at-RATE):min(len(samples), at+RATE*5)]
         blocks.append({'time': at/RATE, **estimate(part)})
+    trusted=[b for b in blocks if b['room']>0 and (b['decay_evidence']>=2 or
+        any(other is not b and other['room']>0 and other['decay_evidence']>=1
+            and abs(other['time']-b['time'])<=4 and
+            abs(other['decay']-b['decay'])<.25 for other in blocks))]
+    for block in blocks:
+        if block['room'] or not trusted:continue
+        nearest=min(trusted,key=lambda b:abs(b['time']-block['time']))
+        # Continuous singing hides tails. A nearby measured room remains a
+        # useful estimate, not proof that this block is completely dry.
+        if abs(nearest['time']-block['time'])<=8:
+            block.update(room=nearest['room'],decay=nearest['decay'],room_inherited=True)
+    # A missing waveform-copy measurement during continuous singing isn't an
+    # off switch. Bridge one block only between matching confirmed delays.
+    for index,block in enumerate(blocks[1:-1],1):
+        before,after=blocks[index-1],blocks[index+1]
+        if not block['delay_wet'] and before['delay_wet'] and after['delay_wet'] and abs(before['delay']-after['delay'])<.01:
+            block.update(delay=(before['delay']+after['delay'])/2,
+                         delay_wet=min(before['delay_wet'],after['delay_wet']),delay_inherited=True)
     return blocks
 
 

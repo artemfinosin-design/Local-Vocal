@@ -1,5 +1,4 @@
 [
-  "SvoyaVersiya.exe",
   "updater.py",
   "update-config.json",
   "updates-ui.js",
@@ -30,6 +29,7 @@
   "test_desktop.py",
   "setup-desktop.bat",
   "app.ico",
+  "SvoyaVersiya.exe",
   "app.py",
   "audio_core.py",
   "runtime.py",

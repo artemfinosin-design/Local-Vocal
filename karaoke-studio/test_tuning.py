@@ -7,6 +7,35 @@ from voice import tuning_options,tuning_profile
 import app
 
 class TuningChecks(unittest.TestCase):
+    def test_backing_gain_is_not_calibrated_to_silent_microphone_noise(self):
+        from audio_core import _stable_vocal_gain
+        measured=np.full(100,.001);measured[40:55]=.08
+        target=np.full(100,.15)
+        gain=_stable_vocal_gain(measured,target)
+        self.assertLess(float(np.median(gain[43:52])),3)
+        self.assertGreater(float(np.median(gain[43:52])),1)
+
+    def test_effect_gaps_require_measured_neighbours(self):
+        from unittest.mock import patch
+        from effects import analyze_effects
+        def block(room=0,delay=0):
+            return dict(room=room,decay=.5,decay_evidence=int(room>0),delay_wet=delay,delay=.28,width=0,confidence=.95)
+        with patch('effects.estimate',side_effect=[block(.1,.15),block(.1),block(0,.15),block()]):
+            blocks=analyze_effects(np.zeros((RATE*16,2),np.float32))
+        self.assertEqual(blocks[2]['room'],.1)
+        self.assertEqual(blocks[1]['delay_wet'],.15)
+        self.assertEqual(blocks[3]['delay_wet'],0)
+        with patch('effects.estimate',return_value=block()):
+            self.assertFalse(any(b['room'] or b['delay_wet'] for b in analyze_effects(np.zeros((RATE*12,2)))))
+    def test_coaching_uses_raw_notes_and_does_not_invent_score_for_silence(self):
+        from audio_core import vocal_report
+        v=self.tone(220);logs=[];pitch_match(v,self.tone(225),diagnostics=logs)
+        p=logs[0]['performance'];self.assertGreater(p['melody_score'],90)
+        self.assertTrue(p['advice']);self.assertTrue(p['range_hz'])
+        times=np.arange(300)*.01;zero=np.zeros(300)
+        unknown=vocal_report(np.zeros(RATE*3),np.zeros(RATE*3),zero,times,zero,zero.astype(bool),zero)
+        self.assertNotIn('melody_score',unknown)
+        self.assertIn('Недостаточно',unknown['summary'])
     def test_register_change_does_not_drag_high_voice_down_an_octave(self):
         from voice import track_pitch
         t=np.arange(RATE*4)/RATE;hz=np.where(t<2,220,440)

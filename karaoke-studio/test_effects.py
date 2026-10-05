@@ -4,6 +4,9 @@ from effects import RATE, impulse, spatial, render_effects, vocal_dynamics, esti
 
 
 def main():
+    spread=spatial(np.array([.5]+[0.]*(RATE//2),np.float32),RATE,width=1)
+    assert np.count_nonzero(spread)>RATE//5, 'stereo spread must not be a single comb-filter tap'
+    np.testing.assert_allclose(spread.sum(axis=1),0,atol=1e-7)
     ir = impulse(RATE, 1.2)
     assert np.count_nonzero(ir) > RATE, 'reverb must have a dense field, not a handful of taps'
     assert not np.allclose(ir[:,0],ir[:,1]), 'stereo tails must be decorrelated'

@@ -6,6 +6,10 @@
   document.querySelectorAll('a[href="#workspace"]').forEach(link=>link.href='#sessionStage');
   frame.innerHTML='<div class="earcup-surface" id="earcupSurface"><div class="session-navigation"><button id="stageBack">← Назад</button><span id="stageName">01 / ФАЙЛ</span><button id="stageNext" class="primary" disabled>Продолжить →</button></div><details class="studio-menu"><summary>☰ Меню студии</summary><nav class="studio-tools" aria-label="Инструменты студии"><button id="newSong">Новая песня</button><button id="openHistory">Мои песни</button><button id="openLyrics">Текст караоке</button><button id="openSources">Дорожки и дубли</button><button id="openVoice">Настроить голос</button><button id="openFeedback">Поделиться примером</button><button id="openUpdates">Обновления</button></nav></details><div class="session-content"></div></div>';
   workspace.insertBefore(frame,shell);frame.insertBefore(object,frame.firstChild);object.classList.add('session-scene');
+  const actions=document.createElement('nav');actions.className='stage-actions';actions.setAttribute('aria-label','Основные действия');
+  for(const id of ['newSong','openHistory','openLyrics','openVoice'])actions.append(document.getElementById(id));
+  frame.querySelector('.earcup-surface').insertBefore(actions,frame.querySelector('.session-content'));
+  const version=document.createElement('p');version.id='engineStatus';version.className='engine-status';version.setAttribute('role','status');version.textContent='Проверяю версию обработки…';workspace.insertBefore(version,frame);
   object.querySelector('.object-controls')?.remove();
   const viewport=document.getElementById('headphoneViewport');viewport.removeAttribute('tabindex');viewport.setAttribute('aria-label','Наушники с рабочим экраном на амбушюре');
   const content=frame.querySelector('.session-content'),upload=document.getElementById('uploadCard'),record=panels[1],mix=panels[2];
@@ -13,15 +17,17 @@
   listen.innerHTML='<span class="eyebrow">ТВОЯ ВЕРСИЯ ГОТОВА</span><h2>Теперь слушай.</h2><canvas id="waveCanvas" aria-hidden="true"></canvas><button id="listenToggle" class="listen-toggle" aria-label="Воспроизвести готовую песню">▶</button><div id="listenLyrics" class="karaoke-display" aria-live="off"></div>';
   listen.append(document.getElementById('resultBox'));frame.append(listen);const review=document.getElementById('renderRating');workspace.insertBefore(review,frame.nextSibling);content.append(upload,record,mix);frame.querySelector('.studio-tools').addEventListener('click',event=>{if(event.target.closest('button'))frame.querySelector('.studio-menu').open=false;});
   const dialog=(id,title)=>{const node=document.createElement('dialog');node.id=id;node.className='studio-dialog';node.setAttribute('aria-labelledby',id+'-title');node.innerHTML=`<header><div><span class="eyebrow">ИНСТРУМЕНТЫ СТУДИИ</span><h2 id="${id}-title">${title}</h2></div><button class="dialog-close" aria-label="Закрыть окно">✕</button></header><div class="dialog-content"></div>`;node.querySelector('button').addEventListener('click',()=>node.close());node.addEventListener('click',event=>{if(event.target===node){const box=node.getBoundingClientRect();if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)node.close();}});document.body.append(node);return node;};
-  const lyricsDialog=dialog('lyricsDialog','Текст караоке'),sourcesDialog=dialog('sourcesDialog','Дорожки и мои дубли');
-  lyricsDialog.querySelector('.dialog-content').append(document.querySelector('.lyrics-editor'));
+  const sourcesDialog=dialog('sourcesDialog','Дорожки и мои дубли');
+  const lyricsPanel=document.createElement('section');lyricsPanel.id='lyricsPanel';lyricsPanel.className='inline-lyrics';lyricsPanel.hidden=true;
+  lyricsPanel.append(document.querySelector('.lyrics-editor'));workspace.insertBefore(lyricsPanel,frame.nextSibling);
   sourcesDialog.querySelector('.dialog-content').append(panels[0]);
   window.studioDialogs={updates:dialog('updatesDialog','Обновления Local Vocal'),history:dialog('historyDialog','Мои песни'),voice:dialog('voiceDialog','Настрой свой голос'),feedback:dialog('feedbackDialog','Пример для улучшения студии')};
   const library=document.createElement('div');library.id='takeLibrary';sourcesDialog.querySelector('.dialog-content').append(library);
   shell.remove();document.querySelector('.hero').classList.add('intro-only');
   let roleIds=[],roleNames=[],index=0,ready=false,resultReady=false,lastStage='';
   const back=document.getElementById('stageBack'),next=document.getElementById('stageNext');
-  document.getElementById('openLyrics').addEventListener('click',()=>{if(document.body.classList.contains('busy'))return;lyricsDialog.showModal();});
+  document.getElementById('openLyrics').setAttribute('aria-controls','lyricsPanel');
+  document.getElementById('openLyrics').addEventListener('click',()=>{if(document.body.classList.contains('busy'))return;lyricsPanel.hidden=!lyricsPanel.hidden;document.getElementById('openLyrics').setAttribute('aria-expanded',String(!lyricsPanel.hidden));if(!lyricsPanel.hidden)lyricsPanel.scrollIntoView({block:'start',behavior:'smooth'});});
   document.getElementById('openSources').addEventListener('click',()=>{if(document.body.classList.contains('busy'))return;sourcesDialog.showModal();});
   function show() {
     const isRole=index>0&&index<=roleIds.length,isMix=index===roleIds.length+1&&index>0,isListen=index===roleIds.length+2&&index>0;
@@ -31,6 +37,7 @@
     document.getElementById('stageName').textContent=index===0?'1 / ЗАГРУЗИ ПЕСНЮ':isRole?`${index+1} / ЗАПИСЬ`:isMix?'СОБЕРИ ПЕСНЮ':'СЛУШАЙ';
     back.hidden=index===0;next.hidden=isListen;next.disabled=!ready||(isMix&&!resultReady);
     next.textContent=isMix?'Слушать →':'Дальше →';
+    if(!ready)lyricsPanel.hidden=true;
     frame.classList.toggle('listening',isListen);document.getElementById('earcupSurface').classList.toggle('final-navigation',isListen);
     const detail={stage:index===0?'upload':isRole?'record':isMix?'mix':'listen',side:index%2,title:document.getElementById('stageName').textContent};
     window.studioStage=detail;

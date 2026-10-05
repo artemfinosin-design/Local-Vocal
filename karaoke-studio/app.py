@@ -819,6 +819,12 @@ class StudioServer(ThreadingHTTPServer):
 
 
 if __name__ == "__main__":
+    # start.bat must retire the same stale backend as the desktop launcher.
+    from desktop import retire_previous_server,ready
+    if ready():
+        if '--desktop' not in sys.argv:webbrowser.open('http://127.0.0.1:8765')
+        sys.exit(0)
+    retire_previous_server()
     ffmpeg_path()
     url = "http://127.0.0.1:8765"
     restore_jobs()

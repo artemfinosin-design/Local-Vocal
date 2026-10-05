@@ -339,6 +339,7 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
             'input_rms':float(np.sqrt(np.mean(np.asarray(voice,dtype=float)**2))),
             'profile_revision':int((profile or {}).get('adaptive_revision',0))})
         diagnostics[-1]['performance']=performance_report(raw_distance,paired,times)
+        diagnostics[-1]['performance'].update(vocal_report(voice,reference,user,times,confidence,paired,raw_distance))
         diagnostics[-1]['timbre']=voice_timbre(voice)
     return result
 
@@ -367,6 +368,50 @@ def voice_timbre(voice):
     power=abs(np.fft.rfft(frames*np.hanning(2048),axis=1))**2
     hz=np.fft.rfftfreq(2048,1/RATE);bands=[np.sum(power[:,(hz>=a)&(hz<b)],axis=1) for a,b in zip([80,250,500,1000,2000,4000],[250,500,1000,2000,4000,8000])]
     mean=np.mean(bands,axis=1);return (mean/(np.sum(mean)+1e-12)).tolist()
+
+
+def vocal_report(voice,reference,pitch,times,confidence,paired,distance):
+    """Evidence-based local coaching; never infer health, talent or emotion."""
+    from scipy.ndimage import median_filter
+    selected=(pitch>0)&(confidence>.7)
+    report=dict(analysis='local-measurements',advice=[],strengths=[])
+    if np.count_nonzero(selected)<100:
+        report['summary']='Недостаточно уверенных нот: итоговая оценка не выставлена.'
+        report['advice']=['Запиши короткий фрагмент в тихом месте, удерживая микрофон на постоянном расстоянии.'];return report
+    report['range_hz']=np.percentile(pitch[selected],[10,90]).round(1).tolist()
+    def envelope(samples):
+        size=441;samples=np.asarray(samples,dtype=float)
+        return np.sqrt(np.mean(np.pad(samples**2,(0,(-len(samples))%size)).reshape(-1,size),axis=1)+1e-12)
+    levels=envelope(voice);active=levels>max(.005,np.percentile(levels,85)*.2)
+    report['clipping_percent']=round(float(np.mean(abs(voice)>=.98))*100,3)
+    report['level_spread_db']=round(float(20*np.log10(np.percentile(levels[active],90)/max(1e-8,np.percentile(levels[active],10)))),1) if np.any(active) else None
+    count=np.count_nonzero(paired)
+    if count>=300:
+        error=(distance+6)%12-6
+        hits=float(np.mean(abs(error[paired])<=.5))*100
+        report.update(melody_score=round(hits),summary='Мелодия: '+str(round(hits))+' из 100 по уверенно сравнимым нотам.')
+        if hits>=75:report['strengths'].append('Большинство сравнимых нот попали в мелодию.')
+        if hits<75:report['advice'].append('Повтори фрагменты с низким попаданием медленнее: сначала пропой мелодию на «м», затем добавь слова.')
+        residual=error-median_filter(error,size=21,mode='nearest')
+        fluctuation=float(np.percentile(abs(residual[paired])*100,75));report['pitch_fluctuation_cents']=round(fluctuation,1)
+        if fluctuation>45:report['advice'].append('На удобной ноте попробуй ровное «у» в течение 3–5 секунд. Сравни начало и конец; вибрато само по себе не считается ошибкой.')
+        elif hits>=60:report['strengths'].append('В сравнимых местах высота голоса достаточно устойчива.')
+        target=envelope(reference);n=min(len(levels),len(target));a=np.maximum(np.diff(levels[:n],prepend=levels[0]),0);b=np.maximum(np.diff(target[:n],prepend=target[0]),0)
+        scores=[]
+        for lag in range(-30,31):
+            aa=a[max(lag,0):n+min(lag,0)];bb=b[max(-lag,0):n-min(max(lag,0),n)]
+            scores.append(float(np.dot(aa,bb)/(np.linalg.norm(aa)*np.linalg.norm(bb)+1e-12)))
+        best=int(np.argmax(scores));lag=(best-30)*10
+        if scores[best]>.5 and scores[best]>scores[30]*1.15 and abs(lag)>=60:
+            report['possible_timing_ms']=lag
+            report['advice'].append('Атаки слов могут быть сдвинуты примерно на '+str(abs(lag))+' мс. Проверь задержку под музыку, прежде чем оценивать ритм своего пения.')
+    else:report['summary']='Диапазон измерен, но для оценки мелодии слишком мало совпавших уверенных участков.'
+    if report['clipping_percent']>.1:report['advice'].insert(0,'Запись перегружается: уменьши усиление микрофона и перезапиши громкие места.')
+    elif report['level_spread_db'] is not None and report['level_spread_db']>18:report['advice'].append('Громкость сильно меняется. Проверь расстояние до микрофона и сравни тихую фразу с громкой; часть перепадов может быть задумкой песни.')
+    if not report['advice']:report['advice']=['Продолжай с короткими фрагментами: прослушай сухую запись и повтори самый сложный переход между нотами.']
+    report['advice']=report['advice'][:3]
+    report['limits']='Оценка касается высоты и записи, а не красоты тембра или артистизма. Разделение, шум, гармонии и задержка могут влиять на результат.'
+    return report
 
 
 def _tone_match(voice, reference, mask, personal=None):
@@ -399,7 +444,9 @@ def _stable_vocal_gain(measured, target):
     nonzero = measured[measured > 1e-6]
     if not len(nonzero):
         return np.ones_like(measured)
-    floor = max(1e-6, float(np.percentile(nonzero, 75)) * .005)
+    # Count sung phrases, not the microphone's noise during a mostly silent
+    # backing take. Otherwise its noise defines the gain (often the 40x cap).
+    floor = max(1e-6, float(np.percentile(nonzero, 90)) * .10)
     active = (measured > floor) & (target > 1e-6)
     if not np.any(active):
         return np.ones_like(measured)
@@ -518,9 +565,9 @@ def mix(instrumental, references, tracks, meta, autotune=True, vocal_db=0, space
         original_rms = np.pad(original_rms, (0, max(0, len(measured) - len(original_rms))))[:len(measured)]
         simultaneous = overlap[role["reference"]]
         simultaneous = np.pad(simultaneous, (0, max(0, len(measured) - len(simultaneous))))[:len(measured)]
-        music_rms = np.asarray([np.sqrt(np.mean(instrumental[i:i + HOP] ** 2)) for i in range(0, total, HOP)])
-        presence = 0.8 if role_id != "backing" else 0.25
-        target = np.maximum(2 * original_rms, music_rms * presence) / np.maximum(simultaneous, 1)
+        # render_effects splits mono between two channels. Match the original
+        # per-channel level; music must not impose a minimum on backing vocals.
+        target = 2 * original_rms / np.maximum(simultaneous, 1)
         dynamic_gain = _stable_vocal_gain(measured, target)
         dry = aligned * np.interp(times / meta["hop"], np.arange(len(dynamic_gain)), dynamic_gain) * 10 ** (vocal_db / 20)
         if space in {'distant', 'telephone', 'radio'}:
@@ -536,6 +583,13 @@ def mix(instrumental, references, tracks, meta, autotune=True, vocal_db=0, space
             name=role['reference']
             if name not in effects_by_reference:
                 effects_by_reference[name]=analyze_effects(references[name])
+                if name=='lead' and 'vocals' in references:
+                    # Separation may put the main singer's ambience in the
+                    # residual stem. Recover evidenced room, never copy its F0.
+                    ambient=analyze_effects(references['vocals'])
+                    for block,original in zip(effects_by_reference[name],ambient):
+                        if not block['room'] and original['room']>0:
+                            block.update(room=original['room'],decay=original['decay'],room_from_full_vocal=True)
             blocks=effects_by_reference[name]
         if diagnostics is not None:
             diagnostics.append({'stage':'mix','role':role_id,'reference':role['reference'],'space':space,

@@ -32,8 +32,9 @@ updateMonitorVolume();
 window.refreshVocalEditors=()=>roles.forEach(role=>role.editor?.draw());
 function syncControls() {
   document.body.classList.toggle('busy', busy());
-  $('file').disabled = busy(); $('render').disabled = busy(); $('stop').hidden = !recording;
-  for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button')) control.disabled = busy();
+  $('file').disabled = busy(); $('render').disabled = busy()||window.engineCompatible===false; $('stop').hidden = !recording;
+  for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button,.stage-actions button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
+  if(window.engineCompatible===false)document.querySelectorAll('.record-selection').forEach(node=>node.disabled=true);
   $('chooseFile').disabled=busy();$('resumeProject').disabled=busy();
   $('newSong').disabled=recording||rendering||uploading||mutating||calibrating;
   $('openHistory').disabled=$('newSong').disabled;
@@ -210,6 +211,7 @@ async function prepareMusic(audio,start,signal) {
   if(audio.readyState<2) await waitAudio(audio,'canplay',signal);
 }
 async function startRecording(role, range=null) {
+  if(window.engineCompatible===false){$('recordStatus').textContent='Версии экрана и обработки различаются. Перезапусти студию обновлённым ярлыком.';return;}
   if (busy()) return;
   if(window.voiceSetup&&!window.voiceSetup.beforeRecording())return;
   stopPreview(); pauseAll(); recording=true; syncControls();
@@ -255,6 +257,7 @@ $('stop').addEventListener('click',()=>{ if (recorder?.state==='recording') reco
 $('instrumental').addEventListener('timeupdate',()=>{ if(recorder?.state==='recording' && recordSession?.end && $('instrumental').currentTime>=recordSession.end) recorder.stop(); });
 $('instrumental').addEventListener('ended',()=>{ if(recorder?.state==='recording') recorder.stop(); });
 async function render() {
+  if(window.engineCompatible===false){$('renderStatus').textContent='Старая фоновая обработка ещё запущена. Перезапусти студию обновлённым ярлыком.';return;}
   if (busy()) return;
   const tracks=roles.flatMap(role=>activeTakes(role).map(take=>({id:take.id,offset:Number($('offset-'+take.id)?.value||0)})));
   if(!tracks.length) { $('renderStatus').textContent='Сначала запиши хотя бы один фрагмент.'; return; }

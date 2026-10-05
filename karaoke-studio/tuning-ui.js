@@ -57,6 +57,11 @@
       card.append(element('strong','',roles.find(r=>r.id===voice.role)?.name||'Вокал'));
       card.append(element('p','',p.hit_percent==null?'Недостаточно уверенно распознанных нот для оценки.':`${p.hit_percent}% в пределах ±½ полутона · типичное отклонение ${p.median_cents} центов`));
       card.append(element('p','subtle',`Сравнено ${p.compared_seconds} с уверенных нот. Октава голоса учитывается; неясные участки и одобренные спецэффекты пропускаются.`));
+      if(p.summary)card.append(element('h4','coach-summary',p.summary));
+      if(p.range_hz)card.append(element('p','subtle',`Диапазон записи ${p.range_hz.join('–')} Гц · перепад громкости ${p.level_spread_db??'—'} дБ · перегруз ${p.clipping_percent??0}%`));
+      for(const strength of p.strengths||[])card.append(element('p','coach-strength','✓ '+strength));
+      if(p.advice?.length){card.append(element('h4','','Что попробовать'));const tips=element('ul','coach-advice');for(const tip of p.advice)tips.append(element('li','',tip));card.append(tips);}
+      if(p.limits)card.append(element('p','subtle',p.limits));
       const line=element('div','performance-timeline');
       for(const segment of p.segments||[]){const b=button(`${seconds(segment.start,true)} · ${segment.hit_percent}%`,()=>{$('result').currentTime=segment.start;});b.title=`Слушать ${seconds(segment.start,true)}–${seconds(segment.end,true)}`;b.style.setProperty('--hit',segment.hit_percent+'%');line.append(b);}
       if(line.childElementCount){const details=element('details');details.append(element('summary','','Попадание по фрагментам'),line);card.append(details);}report.append(card);

@@ -11,6 +11,8 @@ def reply(app='sv-local-vocal-studio',folder=desktop.IDENTITY,version=desktop.BA
 
 
 def main():
+    with patch('desktop.BACKEND_VERSION',9),patch('desktop.urlopen',return_value=reply(version=14)):
+        assert desktop.ready(), 'frozen launcher must use installed backend version'
     with patch('desktop.urlopen',return_value=reply()),patch('desktop.subprocess.Popen') as launch:
         desktop.ensure_server()
         launch.assert_not_called()

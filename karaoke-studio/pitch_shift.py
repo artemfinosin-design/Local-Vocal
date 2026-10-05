@@ -16,25 +16,29 @@ def shift_waveform(voice, pitch, times, correction, reliable):
     # Close at most a 20ms tracking hole within a voiced sound, never silence.
     usable=binary_closing(reliable,structure=np.ones(3))&(pitch>0)
     edges=np.diff(np.r_[False,usable,False].astype(int))
-    filtered=sosfilt(butter(2,900,fs=RATE,output='sos'),voice)
     processed=0
     for first,last in zip(np.flatnonzero(edges==1),np.flatnonzero(edges==-1)):
         if last-first<8 or np.max(abs(correction[first:last]))<.02:continue
         lo=max(0,round(times[first]*RATE));hi=min(len(voice),round(times[last-1]*RATE))
         if hi-lo<2205:continue
+        # A fixed 900 Hz detector can jump between different harmonics as a
+        # vowel changes. Follow the fundamental band of this voiced region.
+        begin=max(0,lo-4410)
+        cutoff=float(np.clip(np.median(pitch[first:last])*1.25,100,1800))
+        filtered=sosfilt(butter(4,cutoff,fs=RATE,output='sos'),voice[begin:hi])
         def frequency(sample):return float(np.interp(sample/RATE,times[first:last],pitch[first:last]))
         def desired(sample):return frequency(sample)*2**(float(np.interp(sample/RATE,times[first:last],correction[first:last]))/12)
         period=RATE/frequency(lo)
         # All grains use positive low-frequency peaks to keep pulse phase aligned.
         a=lo;b=min(hi,lo+round(period))
         if b<=a:continue
-        position=float(a+np.argmax(filtered[a:b]));epochs=[position]
+        position=float(a+np.argmax(filtered[a-begin:b-begin]));epochs=[position]
         while position<hi:
             expected=position+RATE/frequency(position)
             radius=round(.18*RATE/frequency(expected))
             a=max(round(position)+1,round(expected)-radius);b=min(hi,round(expected)+radius+1)
             if b<=a:break
-            position=float(a+np.argmax(filtered[a:b]));epochs.append(position)
+            position=float(a+np.argmax(filtered[a-begin:b-begin]));epochs.append(position)
         epochs=np.asarray(epochs)
         if len(epochs)<5:continue
         # Periodic confidence alone can accept growl/breathy or doubled audio.

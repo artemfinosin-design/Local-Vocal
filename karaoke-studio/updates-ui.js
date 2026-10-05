@@ -26,5 +26,13 @@
     try{const result=await window.pywebview.api.apply_update();if(result?.error)throw new Error(result.error);}
     catch(e){$('updateStatus').textContent=e.message;$('installUpdate').disabled=false;}
   });
+  request('/api/health').then(health=>{
+    const expected=Number(document.querySelector('.edition').textContent.match(/\d+/)?.[0]);
+    const status=$('engineStatus');
+    window.engineCompatible=health.version===expected;
+    status.textContent=`Обработка β${health.version} · интерфейс β${expected}`;
+    if(!window.engineCompatible){status.classList.add('mismatch');status.textContent+= ' · Фоновая обработка не обновлена. Закрой окно и запусти обновлённый ярлык. Записи сохранены.';}
+    syncControls();
+  }).catch(e=>{window.engineCompatible=false;syncControls();$('engineStatus').textContent='Не удалось проверить обработчик: '+e.message+' · Перезапусти студию.';});
   request('/api/update-status').then(value=>value.state==='idle'?start('check'):paint(value)).catch(()=>{});
 })();

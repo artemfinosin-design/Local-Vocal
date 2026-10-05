@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import time
+import re
 from installer import install, native_setup
 from runtime import BACKEND_VERSION
 from urllib.error import URLError, HTTPError
@@ -20,13 +21,23 @@ IDENTITY = hashlib.sha256(str(HERE.resolve()).casefold().encode()).hexdigest()
 RUNTIME = HERE / '.runtime'
 
 
+def installed_version():
+    # A portable launcher may be older than neighbouring source files. Compare
+    # against the installed backend, not a constant frozen inside the EXE.
+    source=HERE/'runtime.py'
+    if not source.exists():return BACKEND_VERSION
+    match=re.search(r'^BACKEND_VERSION\s*=\s*(\d+)\s*$',source.read_text(encoding='utf-8'),re.M)
+    if not match:raise RuntimeError('Не удалось проверить версию обработки. Распакуй обновление целиком.')
+    return int(match.group(1))
+
+
 def ready():
     try:
         with urlopen(URL+'/api/health', timeout=2) as response:
             status = json.load(response)
         if status.get('app') != 'sv-local-vocal-studio' or status.get('folder') != IDENTITY:
             raise RuntimeError('Этот адрес занят другой копией студии. Закрой её перед запуском.')
-        return status.get('version') == BACKEND_VERSION
+        return status.get('version') == installed_version()
     except (URLError, HTTPError, TimeoutError, OSError):
         return False
 
@@ -37,7 +48,7 @@ def retire_previous_server():
     except (URLError, HTTPError, TimeoutError, OSError):return
     if status.get('app') != 'sv-local-vocal-studio' or status.get('folder') != IDENTITY:
         raise RuntimeError('Этот адрес занят другой копией студии. Закрой её перед запуском.')
-    if status.get('version') == BACKEND_VERSION:return
+    if status.get('version') == installed_version():return
     try:
         with urlopen(Request(URL+'/api/shutdown',data=b'{}',headers={'Content-Type':'application/json'}),timeout=5) as response:response.read()
     except HTTPError as exc:
