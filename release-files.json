@@ -1,4 +1,6 @@
 [
+  "youtube.py",
+  "test_youtube.py",
   "test_lyrics.py",
   "updater.py",
   "update-config.json",

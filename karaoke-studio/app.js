@@ -37,6 +37,7 @@ function syncControls() {
   for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button,.stage-actions button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
   if(window.engineCompatible===false)document.querySelectorAll('.record-selection').forEach(node=>node.disabled=true);
   $('chooseFile').disabled=busy();$('resumeProject').disabled=busy();
+  $('youtubeUrl').disabled=busy();$('importYoutube').disabled=busy();
   $('newSong').disabled=recording||rendering||uploading||mutating||calibrating;
   $('openHistory').disabled=$('newSong').disabled;
   if (!busy()) window.studioFlow.show();
@@ -52,25 +53,37 @@ function button(text, handler, className='preview-button') {
 async function upload(file) {
   if (!file || busy()) return;
   if (file.size > 150 * 1024 * 1024) { $('status').textContent='Файл больше 150 МБ'; return; }
+  return importSong(`Загружаю ${file.name}…`, () => request('/api/upload?filename='+encodeURIComponent(file.name), {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body:file}));
+}
+async function importSong(message, start) {
+  if (busy()) return;
   resetProject();
   uploading=true; syncControls(); window.studioFlow.uploading();
-  $('uploadCard').classList.add('working'); $('status').textContent=`Загружаю ${file.name}…`;
+  $('uploadCard').classList.add('working'); $('status').textContent=message;
   try {
-    const job = await request('/api/upload?filename='+encodeURIComponent(file.name), {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body:file});
+    const job = await start();
     projectId=job.id; localStorage.setItem('karaokeProject',projectId); history.replaceState(null,'','?project='+projectId); pollProject();
   } catch(error) { $('status').textContent=error.message; $('uploadCard').classList.remove('working'); }
   finally { uploading=false; syncControls(); }
 }
+$('youtubeImport').addEventListener('submit', event => {
+  event.preventDefault();
+  const url=$('youtubeUrl').value.trim();
+  if (!url || busy()) return;
+  importSong('Подключаюсь к YouTube…', () => request('/api/import-youtube', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url})
+  }));
+});
 function resetProject() {
   stopPreview();pauseAll();roles.forEach(role=>role.editor?.dispose());clearTimeout(pollTimer);
   projectId=null;project=null;roles=[];analysisPending=false;lyrics=null;lyricLine=-2;suggestion=null;lyricState='';lyricSource=null;cancelAnimationFrame(lyricFrame);
   for(const id of ['roles','takeLibrary','mixDelays','markers','effectProposalList'])$(id).replaceChildren();
   document.querySelectorAll('audio').forEach(audio=>{audio.removeAttribute('src');audio.load();});
   document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());
-  $('file').value='';$('lyricsText').value='';$('songArtist').value='';$('songTitle').value='';
+  $('file').value='';$('youtubeUrl').value='';$('lyricsText').value='';$('songArtist').value='';$('songTitle').value='';
   $('lyricsSuggestion').hidden=true;$('resultBox').hidden=true;$('resumeProject').hidden=true;
   $('analysisStatus').textContent='';$('renderStatus').textContent='';$('lyricsStatus').textContent='';
-  $('uploadCard').classList.remove('working');$('status').textContent='Выбери песню или перетащи файл сюда.';
+  $('uploadCard').classList.remove('working');$('status').textContent='Выбери файл или вставь ссылку на YouTube.';
   history.replaceState(null,'',location.pathname+'#sessionStage');
   paintLyrics(0);window.studioFlow.uploading();syncControls();
   window.showRenderFeedback?.(null,false);

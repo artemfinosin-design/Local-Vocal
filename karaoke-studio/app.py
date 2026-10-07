@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 from audio_core import analyze, markers, mix, read_wav, read_reference, role_guide, save_meta, write_wav
 from runtime import ffmpeg_path, BACKEND_VERSION
 from lyrics import guess_title, lookup, lrc_lines
+from youtube import video_url, download_audio
 from effects import train as train_effects, REPORT, analyze_effects, SPACE_MODES
 
 HERE = Path(__file__).resolve().parent
@@ -169,13 +170,23 @@ def song_info(source, filename):
     return info
 
 
-def prepare(job_id, uploaded, filename=""):
+def import_youtube(job_id, url):
+    def report(message):
+        with lock: jobs[job_id]['state'] = message
+    try:
+        source, filename, metadata = download_audio(url, DATA / job_id, report, MAX_UPLOAD, MAX_DURATION)
+        prepare(job_id, source, filename, metadata)
+    except Exception as exc:
+        with lock: jobs[job_id] = {'state': 'error', 'error': str(exc)[-1800:]}
+
+
+def prepare(job_id, uploaded, filename="", metadata=None):
     folder = DATA / job_id
     try:
         with lock:
             jobs[job_id]["state"] = "Преобразую файл"
         convert(uploaded, folder / "song.wav", 2)
-        info=song_info(uploaded,filename)
+        info=metadata or song_info(uploaded,filename)
         with wave.open(str(folder/'song.wav')) as song:duration=song.getnframes()/song.getframerate()
         with lock:
             jobs[job_id].update(song_info=info,duration=duration,lyrics_state='searching')
@@ -678,6 +689,17 @@ class Handler(BaseHTTPRequestHandler):
                     source.unlink(missing_ok=True)
                 threading.Thread(target=learn_effects, daemon=True).start()
                 return self.reply(202, {'state':'processing'})
+            if parsed.path == '/api/import-youtube':
+                body = json.loads(self.request_body(4096))
+                if not isinstance(body, dict):
+                    raise ValueError('Нужна ссылка на видео YouTube')
+                url = video_url(body.get('url'))
+                job_id = uuid.uuid4().hex
+                (DATA / job_id).mkdir()
+                with lock:
+                    jobs[job_id] = {'state': 'Подключаюсь к YouTube', 'source_url': url}
+                threading.Thread(target=import_youtube, args=(job_id, url), daemon=True).start()
+                return self.reply(202, {'id': job_id})
             if parsed.path == "/api/upload":
                 filename = query.get("filename", [""])[0]
                 suffix = Path(filename).suffix.lower()

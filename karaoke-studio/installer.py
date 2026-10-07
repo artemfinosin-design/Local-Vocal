@@ -122,7 +122,7 @@ def usable_python(path):
     except (OSError,subprocess.TimeoutExpired):return False
 
 
-PROBE='''import imageio_ffmpeg,numpy,scipy,pyworld,librosa,torch,torchvision,torchaudio,sklearn,stable_whisper
+PROBE='''import imageio_ffmpeg,numpy,scipy,pyworld,librosa,torch,torchvision,torchaudio,sklearn,stable_whisper,yt_dlp,yt_dlp_ejs
 from audio_separator.separator import Separator
 from runtime import ffmpeg_path
 import subprocess
@@ -191,6 +191,13 @@ def _install(root, report, cancel, force):
         run(command,root,report,cancel,'Аудиокомпоненты')
         if not dependencies_ok(python,root):
             raise RuntimeError('Компоненты скачаны, но проверка звука не прошла. Нажми «Повторить» для восстановления установки.')
+    item=manifest['youtube_runtime']
+    node=runtime/item['folder']/'node.exe'
+    if force or not usable_node(node):
+        stage(2,'Подготавливаю загрузку с YouTube')
+        archive=download(item['url'],runtime/'downloads/node.zip',report,cancel,item['sha256'])
+        unpack(archive,runtime)
+        if not usable_node(node):raise RuntimeError('Не удалось подготовить загрузку с YouTube. Нажми «Повторить».')
     for index,item in enumerate(manifest['models']):
         stage(3,'Загружаю модели · '+str(index+1)+' / '+str(len(manifest['models'])))
         target=root/item['path']
@@ -200,6 +207,15 @@ def _install(root, report, cancel, force):
     check_cancel(cancel)
     (runtime/'installed.json').write_text(json.dumps({'python':str(python),'requirements':sha256(root/'requirements.txt')},ensure_ascii=False),encoding='utf-8')
     return python
+
+
+def usable_node(path):
+    if not Path(path).is_file():return False
+    try:
+        result=subprocess.run([str(path),'--version'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,text=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW)
+        return result.returncode==0 and result.stdout.strip()=='v22.23.3'
+    except (OSError,subprocess.TimeoutExpired):return False
 
 
 @contextmanager
