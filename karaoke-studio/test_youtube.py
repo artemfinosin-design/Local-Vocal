@@ -8,6 +8,13 @@ import youtube
 
 
 class YoutubeChecks(unittest.TestCase):
+    def test_youtube_errors_distinguish_rate_limit_and_login(self):
+        self.assertIn('429', youtube.download_error('HTTP Error 429: Too Many Requests\nSign in to confirm you are not a bot'))
+        self.assertIn('не использует вход из браузера', youtube.download_error("Sign in to confirm you’re not a bot"))
+        self.assertIn('недоступно', youtube.download_error('This video is unavailable'))
+        self.assertIn('интернет', youtube.download_error('Unable to download webpage: timed out'))
+        self.assertIn('youtube-error.log', youtube.download_error('Unknown extractor error'))
+
     def test_import_uses_existing_processing_and_reports_failure(self):
         import app
         identity='c'*32

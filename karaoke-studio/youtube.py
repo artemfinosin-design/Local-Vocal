@@ -10,6 +10,21 @@ from lyrics import guess_title
 from runtime import ffmpeg_path
 
 
+def download_error(message):
+    message = message.lower()
+    if '429' in message or 'too many requests' in message:
+        return 'YouTube временно ограничил запросы с этого подключения (429). Подожди и попробуй позже. Если нужна песня сейчас, выбери аудиофайл.'
+    if 'not a bot' in message or 'confirm you' in message:
+        return 'YouTube требует подтверждения «Я не робот» или входа. Загрузчик студии не использует вход из браузера и не может пройти эту проверку. Можно загрузить аудиофайл.'
+    if 'private video' in message or 'members-only' in message or 'age' in message and 'confirm' in message:
+        return 'Видео требует доступа к аккаунту или подтверждения возраста. Выбери доступное видео либо аудиофайл.'
+    if 'unavailable' in message or 'not available' in message or 'removed' in message:
+        return 'Видео недоступно для загрузки: оно удалено или ограничено. Проверь ссылку либо выбери аудиофайл.'
+    if any(word in message for word in ('timed out', 'getaddrinfo', 'unable to download', 'connection')):
+        return 'Не удалось подключиться к YouTube. Проверь интернет и попробуй снова либо выбери аудиофайл.'
+    return 'Не удалось скачать аудио с YouTube. Подробности сохранены в журнале проекта youtube-error.log. Можно выбрать аудиофайл.'
+
+
 def video_url(value):
     if not isinstance(value, str) or len(value) > 2048:
         raise ValueError('Вставь ссылку на видео YouTube')
@@ -59,9 +74,10 @@ def download_audio(url, folder, report, max_bytes, max_duration):
         percent = min(100, int(done / total * 100)) if total else None
         report('Скачиваю аудио с YouTube' + (f' · {percent}%' if percent is not None else f' · {done / 1024**2:.1f} МБ'))
 
+    warnings = []
     class Quiet:
         def debug(self, message): pass
-        def warning(self, message): pass
+        def warning(self, message): warnings.append(str(message))
         def error(self, message): pass
 
     folder = Path(folder)
@@ -101,5 +117,7 @@ def download_audio(url, folder, report, max_bytes, max_duration):
             if info.get('artist'):
                 metadata['artist'] = str(info['artist'])[:200]
             return destination, title + '.m4a', metadata
-        except DownloadError:
-            raise ValueError('YouTube не дал загрузить аудио. Проверь доступность видео; приватные видео и ограничения входа не поддерживаются. Можно загрузить файл.') from None
+        except DownloadError as exc:
+            details = '\n'.join(warnings + [str(exc)])
+            (folder / 'youtube-error.log').write_text(details, encoding='utf-8')
+            raise ValueError(download_error(details)) from None
