@@ -35,7 +35,7 @@
   const secret = () => {
     document.body.classList.toggle('acid-mode');
     const acid = document.body.classList.contains('acid-mode');
-    dispatchEvent(new CustomEvent('studio-accent', {detail: acid ? '#d3ef85' : '#ff985a'}));
+    dispatchEvent(new CustomEvent('studio-accent', {detail: acid ? '#d3ef85' : getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()}));
     window.studioToast(acid ? 'Паттерн 303 найден. Добро пожаловать в acid room.' : 'Вернулись к тёплому студийному свету.');
   };
   document.getElementById('brandEgg').addEventListener('dblclick', event => { event.preventDefault(); secret(); });

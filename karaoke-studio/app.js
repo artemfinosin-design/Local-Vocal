@@ -34,7 +34,7 @@ window.refreshVocalEditors=()=>roles.forEach(role=>role.editor?.draw());
 function syncControls() {
   document.body.classList.toggle('busy', busy());
   $('file').disabled = busy(); $('render').disabled = busy()||window.engineCompatible===false; $('stop').hidden = !recording;
-  for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button,.stage-actions button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
+  for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button:not(#openHelp):not(#openAppearance),.stage-actions button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
   if(window.engineCompatible===false)document.querySelectorAll('.record-selection').forEach(node=>node.disabled=true);
   $('chooseFile').disabled=busy();$('resumeProject').disabled=busy();
   $('youtubeUrl').disabled=busy();$('importYoutube').disabled=busy();
@@ -282,7 +282,7 @@ async function render() {
   stopPreview(); pauseAll(); rendering=true; syncControls(); $('renderStatus').textContent='Собираю фрагменты, выравниваю громкость и применяю обработку…';
   try {
     const result=await post('render',{tracks,autotune:$('autotune').checked,tune_mode:$('tuneMode').value,tune_settings:window.tuneSettings?.(),pitch_falls:$('pitchFalls').checked,vocal_db:Number($('vocalGain').value),space:$('space').value});
-    window.showRenderFeedback?.(result.render_id,true,result.diagnostics); window.loadPersonalProfile?.(); $('result').src=result.url; $('download').href=result.url; $('resultBox').hidden=false; window.studioFlow.result(); $('renderStatus').textContent='Готово. Нажми «Перейти к прослушиванию».';
+    window.showRenderFeedback?.(result.render_id,true,result.diagnostics); window.loadPersonalProfile?.(); $('result').src=result.url; $('download').href=result.url; $('resultBox').hidden=false; window.studioFlow.result(); $('renderStatus').textContent='Готово. Слушай свою версию и оцени обработку ниже.';
   } catch(error) { $('renderStatus').textContent=error.message; }
   finally { rendering=false; syncControls(); }
 }

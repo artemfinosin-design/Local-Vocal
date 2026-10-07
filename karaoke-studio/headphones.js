@@ -4,7 +4,7 @@ const host = document.getElementById('headphoneViewport');
 const surface = document.getElementById('earcupSurface');
 
 try {
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const renderer = new THREE.WebGLRenderer({alpha: true, antialias: true, powerPreference: 'low-power'});
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -165,6 +165,8 @@ try {
     if(stage==='listen'){surface.style.transform='';surface.style.width='';surface.style.height='';surface.style.opacity='1';surface.style.pointerEvents='';surface.inert=false;}
     if(initial||reduced){cameraAngle=Math.atan2(cameraGoal.x,cameraGoal.z);cameraRadius=Math.hypot(cameraGoal.x,cameraGoal.z);camera.position.copy(cameraGoal);looking.copy(lookGoal);}
   }
+  reduced=reduced||!!window.studioAppearance?.calm;
+  addEventListener('studio-appearance',()=>{reduced=matchMedia('(prefers-reduced-motion: reduce)').matches||!!window.studioAppearance?.calm;});
   addEventListener('studio-stage',event=>setStage(event.detail));
   function projectSurface() {
     if(stage==='listen')return;
@@ -195,6 +197,7 @@ try {
   new ResizeObserver(resize).observe(host);
   new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;}).observe(host);
   addEventListener('studio-accent',event=>trim.color.set(event.detail));
+  trim.color.set(getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
   setStage(window.studioStage||{stage:'upload',side:0},true);requestAnimationFrame(render);
 } catch(error) {
   host.classList.remove('three-ready');document.getElementById('sessionStage').classList.add('model-fallback');
