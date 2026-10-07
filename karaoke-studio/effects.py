@@ -15,14 +15,14 @@ SPACE_MODES = CHARACTER_MODES | {'auto','dry','room','hall','plate','distant','s
 
 
 @lru_cache(maxsize=64)
-def impulse(rate, decay, predelay=.025):
+def impulse(rate, decay, predelay=.025, damping=6500):
     """Decorrelated early reflections and dense, damped -60 dB late field."""
     decay = float(np.clip(decay, .2, 3))
     rng = np.random.default_rng(173)
     length = round(rate * decay)
     t = np.arange(length) / rate
     noise = rng.normal(size=(length, 2))
-    noise = sosfilt(butter(2, min(6500, rate * .35), fs=rate, output='sos'), noise, axis=0)
+    noise = sosfilt(butter(2, min(damping, rate * .35), fs=rate, output='sos'), noise, axis=0)
     # Increasing density prevents a burst at the start of the late field.
     tail = noise * (np.exp(-6.91 * t / decay) * (1 - np.exp(-t / .035)))[:, None]
     tail /= np.sqrt(np.sum(tail ** 2, axis=0))[None, :] + 1e-9
@@ -36,13 +36,13 @@ def impulse(rate, decay, predelay=.025):
     return tail.astype(np.float32)
 
 
-def spatial(voice, rate, room=0, decay=.8, delay_wet=0, delay=.28, width=0):
+def spatial(voice, rate, room=0, decay=.8, delay_wet=0, delay=.28, width=0, damping=6500):
     """Wet sends only. All delayed repeats are fed from the original signal."""
     voice = np.asarray(voice, np.float32)
     tail = round(rate * max(decay + .12 if room else 0, delay * 6 if delay_wet else 0, .24 if width else .024))
     output = np.zeros((len(voice) + tail, 2), np.float32)
     if room > 0:
-        ir = impulse(rate, round(float(decay), 2))
+        ir = impulse(rate, round(float(decay), 2), damping=round(float(damping)/125)*125)
         for channel in (0, 1):
             reverberated = oaconvolve(voice, ir[:, channel])
             output[:min(len(output), len(reverberated)), channel] += reverberated[:len(output)] * room
@@ -195,12 +195,17 @@ def estimate(samples, rate=RATE, learned=True):
             decays.append(float(np.clip(-3/slope,.3,2.5)))
     decay=float(np.median(decays)) if decays else .8
     measured_delay, measured_wet, delay_confidence = delay_evidence(reduced, 11025 if rate == RATE else rate)
-    stereo_ratio = float(vector[42])
+    # Remove static panning before estimating width: a dry voice in one ear
+    # must not acquire an invented diffuse stereo effect.
+    if reduced.ndim==2:
+        side=(reduced[:,0]-reduced[:,1])/2
+        side-=mono*float(np.dot(side,mono)/(np.dot(mono,mono)+1e-12))
+        stereo_ratio=float(np.sqrt(np.mean(side**2)/(np.mean(mono**2)+1e-12)))
+    else:side=np.zeros_like(mono);stereo_ratio=0
     # A model trained by adding effects to already processed vocals is not evidence
     # that an effect exists. Require waveform copies / diffuse measured tails first.
     diffuse_tail = False
     if decays and reduced.ndim == 2:
-        side = (reduced[:, 0] - reduced[:, 1]) / 2
         quiet = np.repeat(envelope < np.percentile(envelope, 85) * .12, hop)[:len(mono)]
         if np.count_nonzero(quiet) > len(mono) * .05:
             ratio = np.sqrt(np.mean(side[quiet] ** 2) / (np.mean(mono[quiet] ** 2) + 1e-12))
@@ -221,7 +226,19 @@ def estimate(samples, rate=RATE, learned=True):
     result = np.clip(result, [0, .2, 0, 0], [.4, 2.5, .35, 1])
     if np.sqrt(np.mean(reduced ** 2)) < .001:
         result[[0, 2, 3]] = 0
-    return dict(zip(PARAMETERS, map(float, result)), delay=delay,
+    damping=6500
+    if diffuse_tail and np.count_nonzero(quiet)>1024:
+        # Tail colour from the diffuse channel; dry sibilants do not set it.
+        edges=np.diff(np.r_[False,quiet,False].astype(int))
+        spans=list(zip(np.flatnonzero(edges==1),np.flatnonzero(edges==-1)))
+        lo,hi=max(spans,key=lambda bounds:bounds[1]-bounds[0])
+        if hi-lo>=1024:
+            tail=side[lo:min(hi,lo+11025)]
+            spectrum=abs(np.fft.rfft(tail*np.hanning(len(tail))))**2
+            frequencies=np.fft.rfftfreq(len(tail),1/(11025 if rate==RATE else rate))
+            centroid=float(np.sum(spectrum*frequencies)/(np.sum(spectrum)+1e-12))
+            damping=float(np.clip(centroid*2.5,1800,8000))
+    return dict(zip(PARAMETERS, map(float, result)), delay=delay,damping=damping,
                 confidence=float(delay_confidence), decay_evidence=len(decays),
                 dry_evidence=dry_endings, active=bool(np.sqrt(np.mean(reduced**2))>=.001), learned=enabled.tolist())
 
@@ -239,7 +256,7 @@ def analyze_effects(samples):
     # Keep a measured send through acoustically consistent singing until a dry
     # ending, silence or changed stereo scene contradicts it. No time cutoff.
     echoes=[b for b in blocks if b['delay_wet']>0 and b['confidence']>=.84]
-    for field,parameters,support in (('room',('room','decay'),trusted),
+    for field,parameters,support in (('room',('room','decay','damping'),trusted),
                                      ('delay_wet',('delay_wet','delay'),echoes)):
         anchor=None
         for block in blocks:
@@ -252,7 +269,7 @@ def analyze_effects(samples):
             nearest=anchor or min(support,key=lambda b:abs(b['time']-block['time']))
             if anchor or (abs(nearest['time']-block['time'])<=4 and
                     abs(nearest['width']-block['width'])<=max(.12,nearest['width']*.35)):
-                block.update({key:nearest[key] for key in parameters})
+                block.update({key:nearest[key] for key in parameters if key in nearest})
                 block['room_inherited' if field=='room' else 'delay_inherited']=True
     return blocks
 
@@ -262,8 +279,13 @@ def vocal_dynamics(voice):
     voice = np.asarray(voice, np.float32)
     if not len(voice):
         return voice
+    input_peak=float(np.max(abs(voice)))
+    voice=sosfilt(butter(2,45,btype='highpass',fs=RATE,output='sos'),voice).astype(np.float32)
     detector = np.sqrt(uniform_filter1d(voice ** 2, round(RATE*.015), mode='nearest') + 1e-10)
-    db = 20 * np.log10(detector / .22 + 1e-8)
+    active=detector>max(1e-5,float(np.percentile(detector,90))*.1)
+    if not np.any(active):return voice
+    threshold=max(1e-5,float(np.percentile(detector[active],70))*.85)
+    db = 20 * np.log10(detector / threshold + 1e-8)
     knee = 6
     reduction = np.where(db < -knee/2, 0, np.where(db > knee/2, db*.5, (db+knee/2)**2/(4*knee)))
     held = maximum_filter1d(reduction, round(RATE*.025)|1, mode='nearest')
@@ -271,7 +293,9 @@ def vocal_dynamics(voice):
     high = sosfilt(butter(2, 5500, btype='highpass', fs=RATE, output='sos'), voice)
     high_rms = np.sqrt(uniform_filter1d(high**2, round(RATE*.025), mode='nearest') + 1e-10)
     deess = np.clip((high_rms/(detector+1e-6) - .42)*.7, 0, .35)
-    return ((voice-high*deess)*gain).astype(np.float32)
+    output=((voice-high*deess)*gain).astype(np.float32)
+    output*=min(1.,input_peak/(float(np.max(abs(output)))+1e-12))
+    return output
 
 
 def character_effect(voice,pan,kind):
@@ -329,7 +353,7 @@ def render_effects(voice, pan, blocks, space='auto'):
         if end < len(voice):
             envelope[-RATE:] = np.linspace(1, 0, min(RATE, len(envelope)))
         wet = spatial(voice[start:end]*envelope, RATE, block['room'], block['decay'],
-                      block['delay_wet'], block['delay'], block['width'])
+                      block['delay_wet'], block['delay'], block['width'],block.get('damping',6500))
         stop = min(len(voice), start+len(wet))
         stereo[start:stop] += wet[:stop-start]
     return stereo

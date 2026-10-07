@@ -293,7 +293,7 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
     profile=tuning_profile(profile,options['voice_type'])
     if len(voice)<RATE//5 or np.max(abs(voice))<1e-7:return voice
     user,times,confidence=track_pitch(voice,profile)
-    source,source_times,source_confidence=track_pitch(reference)
+    source,source_times,source_confidence=track_pitch(reference,{'reference':True})
     source=np.interp(times,source_times,source)
     source_confidence=np.interp(times,source_times,source_confidence)
     threshold=float((profile or {}).get('adaptive_confidence',.6))
@@ -325,6 +325,7 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
     desired[abs(stable)<options['tolerance_cents']/100]=0
     correction=np.zeros_like(user);current=None
     speed=max(options['speed_ms'],float((profile or {}).get('adaptive_speed_ms',20)))
+    if mode=='studio':speed=max(speed,float((profile or {}).get('recommended_speed_ms',140)))
     response=1-np.exp(-10/speed);user_notes=12*np.log2(np.maximum(user,1))
     for i in range(len(correction)):
         if not reliable[i]:current=None;continue
@@ -340,7 +341,7 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
     result,processed=shift_waveform(voice,user,times,correction,reliable)
     if diagnostics is not None:
         good=(user>0)&(confidence>.7)
-        diagnostics.append({'engine':'waveform-psola-v1','mode':mode,'settings':options,
+        diagnostics.append({'engine':'praat-psola-v2','mode':mode,'settings':options,
             'effective_speed_ms':speed,'confidence_threshold':threshold,'octave_offset':int(octave),
             'voiced_seconds':round(float(np.count_nonzero(good))*.01,2),
             'trusted_seconds':round(float(np.count_nonzero(reliable))*.01,2),
@@ -601,7 +602,7 @@ def mix(instrumental, references, tracks, meta, autotune=True, vocal_db=0, space
                     ambient=analyze_effects(references['vocals'])
                     for block,original in zip(effects_by_reference[name],ambient):
                         if not block['room'] and original['room']>0:
-                            block.update(room=original['room'],decay=original['decay'],room_from_full_vocal=True)
+                            block.update(room=original['room'],decay=original['decay'],damping=original.get('damping',6500),room_from_full_vocal=True)
             blocks=effects_by_reference[name]
         if diagnostics is not None:
             diagnostics.append({'stage':'mix','role':role_id,'reference':role['reference'],'space':space,

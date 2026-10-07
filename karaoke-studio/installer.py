@@ -122,7 +122,7 @@ def usable_python(path):
     except (OSError,subprocess.TimeoutExpired):return False
 
 
-PROBE='''import imageio_ffmpeg,numpy,scipy,pyworld,librosa,torch,torchvision,torchaudio,sklearn,stable_whisper,yt_dlp,yt_dlp_ejs
+PROBE='''import imageio_ffmpeg,numpy,scipy,pyworld,librosa,torch,torchvision,torchaudio,sklearn,stable_whisper,yt_dlp,yt_dlp_ejs,parselmouth
 from audio_separator.separator import Separator
 from runtime import ffmpeg_path
 import subprocess

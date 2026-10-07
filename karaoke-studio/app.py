@@ -849,7 +849,7 @@ class Handler(BaseHTTPRequestHandler):
                                    'start': saved.get('start', 0), 'end': saved.get('end', job['duration']),
                                    'region': saved.get('region', [0, job['duration']])})
                 autotune = settings.get('autotune', False)
-                tune_mode = settings.get('tune_mode', 'gentle')
+                tune_mode = settings.get('tune_mode', 'studio')
                 pitch_falls = settings.get('pitch_falls',True)
                 if not isinstance(pitch_falls,bool): raise ValueError('Некорректная настройка спада высоты')
                 tune_settings = settings.get('tune_settings')

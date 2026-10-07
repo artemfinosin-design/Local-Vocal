@@ -7,7 +7,7 @@
   function note(hz) {const midi=Math.round(69+12*Math.log2(hz/440));return names[((midi%12)+12)%12]+(Math.floor(midi/12)-1);}
   function showProfile() {
     $('resetVoice').disabled=!profile;
-    $('voiceStatus').textContent=profile?`Настройка сохранена · ${note(profile.low_hz)} — ${note(profile.high_hz)}. Диапазон и шум будут учтены при следующей сборке.`:'Настройки пока нет. Можно петь и без неё, но сначала лучше проверить микрофон.';
+    $('voiceStatus').textContent=profile?`Настройка сохранена · ${note(profile.low_hz)} — ${note(profile.high_hz)}. Диапазон и шум будут учтены при следующей сборке.${profile.recommended_speed_ms?' Студийная коррекция учтёт измеренную устойчивость нот.':' Для подбора скорости студийной коррекции можно повторить настройку.'}`:'Настройки пока нет. Можно петь и без неё, но сначала лучше проверить микрофон.';
   }
   async function loadProfile() {
     try { profile=(await request('/api/voice-profile')).profile;showProfile(); }

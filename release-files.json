@@ -1,4 +1,6 @@
 [
+  "LICENSE",
+  "THIRD_PARTY.md",
   "youtube.py",
   "test_youtube.py",
   "test_lyrics.py",

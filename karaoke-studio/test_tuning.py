@@ -7,6 +7,30 @@ from voice import tuning_options,tuning_profile
 import app
 
 class TuningChecks(unittest.TestCase):
+    def test_dry_pan_is_not_width_and_quiet_compression_is_level_independent(self):
+        from effects import estimate,vocal_dynamics
+        t=np.arange(RATE*3)/RATE
+        vowel=(.05*np.sin(2*np.pi*180*t)+.02*np.sin(2*np.pi*360*t)).astype(np.float32)
+        stereo=np.column_stack([vowel,vowel*.2])
+        self.assertEqual(estimate(stereo,learned=False)['width'],0)
+        v=vowel*(.4+.6*np.sin(np.pi*t/3)**2)
+        quiet=vocal_dynamics(v*.1);loud=vocal_dynamics(v)
+        np.testing.assert_allclose(quiet*10,loud,atol=3e-5)
+        self.assertLessEqual(float(np.max(abs(loud))),float(np.max(abs(v)))+1e-6)
+
+    def test_waveform_shift_preserves_unvoiced_consonant_and_length(self):
+        from pitch_shift import shift_waveform
+        from voice import track_pitch
+        t=np.arange(RATE*3)/RATE
+        vowel=sum(np.sin(2*np.pi*180*t*k)/k for k in range(1,12)).astype(np.float32)*.04
+        vowel[RATE:round(1.4*RATE)]=np.random.default_rng(7).normal(0,.015,round(.4*RATE))
+        f,at,c=track_pitch(vowel);reliable=(f>0)&(c>.8)
+        out,_=shift_waveform(vowel,f,at,np.full(len(at),1.5),reliable)
+        self.assertEqual(len(out),len(vowel))
+        np.testing.assert_array_equal(out[int(1.08*RATE):int(1.3*RATE)],vowel[int(1.08*RATE):int(1.3*RATE)])
+        f,at,c=track_pitch(out);good=(at>.4)&(at<.8)&(f>0)&(c>.8)
+        self.assertAlmostEqual(float(np.median(f[good])),180*2**(1.5/12),delta=2)
+
     def test_room_persists_past_eight_seconds_but_stops_on_dry_evidence(self):
         from unittest.mock import patch
         from effects import analyze_effects
@@ -76,7 +100,7 @@ class TuningChecks(unittest.TestCase):
         rms=[np.sqrt(np.mean(result[i:i+2205]**2)) for i in range(RATE,7*RATE,2205)]
         self.assertLess(float(np.std(rms)/np.mean(rms)),.08)
         self.assertGreater(logs[0]['processed_seconds'],6)
-        self.assertEqual(logs[0]['engine'],'waveform-psola-v1')
+        self.assertEqual(logs[0]['engine'],'praat-psola-v2')
     def test_reference_crossing_tritone_does_not_flip_target_octave(self):
         from voice import track_pitch
         t=np.arange(RATE*5)/RATE
@@ -117,7 +141,7 @@ class TuningChecks(unittest.TestCase):
         voice=self.tone(220);source=self.tone(240)
         hard=self.frequency(pitch_match(voice,source,mode='hard'))
         melody=self.frequency(pitch_match(voice,source,mode='melody'))
-        self.assertAlmostEqual(hard,233.08,delta=2);self.assertAlmostEqual(melody,240,delta=2)
+        self.assertAlmostEqual(hard,246.94,delta=2);self.assertAlmostEqual(melody,240,delta=2)
     def test_settings_validation_and_calibration_noise_preserved(self):
         for settings in ({'strength':float('nan')},{'strength':True},{'speed_ms':0},{'voice_type':'unknown'},{'surprise':1}):
             with self.assertRaises(ValueError):tuning_options('melody',settings)
@@ -129,7 +153,7 @@ class TuningChecks(unittest.TestCase):
         try:
             base=f'http://127.0.0.1:{server.server_port}'
             with urlopen(base+'/api/tune-presets') as r:presets=json.load(r)['presets']
-            self.assertEqual(set(presets),{'gentle','natural','melody','hard'})
+            self.assertEqual(set(presets),{'studio','gentle','natural','melody','hard'})
             with urlopen(base+'/tuning-ui.js') as r:self.assertIn(b'tuneSettings',r.read())
         finally:server.shutdown();server.server_close();worker.join()
 

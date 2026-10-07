@@ -18,7 +18,7 @@
     presets=result.presets;$('tuneMode').replaceChildren();
     for(const [key,preset] of Object.entries(presets)){const option=element('option','',preset.name);option.value=key;$('tuneMode').append(option);}
     let local;try{local=JSON.parse(localStorage.getItem('tunePreferences'));}catch{} const remote=personal.preferences;let saved=local&&(local.saved_at||0)>=(remote?.saved_at||0)?local:remote;
-    $('tuneMode').value=presets[saved?.mode]?saved.mode:'melody';
+    $('tuneMode').value=presets[saved?.mode]?saved.mode:'studio';
     for(const [key,id] of Object.entries(keys)){
       const value=saved?.settings?.[key];$(id).value=typeof value==='number'&&Number.isFinite(value)?Math.max(Number($(id).min),Math.min(Number($(id).max),value)):presets[$('tuneMode').value][key];
     }
