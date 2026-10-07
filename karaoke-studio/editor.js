@@ -61,12 +61,12 @@ class VocalEditor {
   }
   draw() {
     const width=this.wave.clientWidth;if(!width)return;
-    const height=140,ratio=Math.min(devicePixelRatio||1,2);this.canvas.width=width*ratio;this.canvas.height=height*ratio;
+    const height=this.canvas.clientHeight||140,ratio=Math.min(devicePixelRatio||1,2);this.canvas.width=width*ratio;this.canvas.height=height*ratio;
     const ctx=this.canvas.getContext('2d');ctx.scale(ratio,ratio);const length=this.view[1]-this.view[0],x=time=>(time-this.view[0])/length*width;
     ctx.fillStyle='#102128';ctx.fillRect(0,0,width,height);
     ctx.fillStyle='#ff985a18';ctx.fillRect(x(this.range[0]),0,x(this.range[1])-x(this.range[0]),height);
     for(const range of this.role.segments){ctx.fillStyle='#d3ef8530';ctx.fillRect(x(range[0]),height-10,Math.max(2,x(range[1])-x(range[0])),10);}
-    for(let pixel=0;pixel<width;pixel+=3){const time=this.view[0]+pixel/width*length,index=Math.floor(time/this.duration*this.peaks.length);const peak=this.peaks[index]||0;ctx.fillStyle=time>=this.range[0]&&time<=this.range[1]?'#ffab74':'#638b96';ctx.fillRect(pixel,height/2-peak*52,2,Math.max(1,peak*104));}
+    for(let pixel=0;pixel<width;pixel+=3){const time=this.view[0]+pixel/width*length,index=Math.floor(time/this.duration*this.peaks.length);const peak=this.peaks[index]||0;ctx.fillStyle=time>=this.range[0]&&time<=this.range[1]?'#ffab74':'#638b96';ctx.fillRect(pixel,height/2-peak*height*.37,2,Math.max(1,peak*height*.74));}
     for(const range of this.role.excluded||[]){ctx.fillStyle='#ff505544';ctx.fillRect(x(range[0]),0,x(range[1])-x(range[0]),height);}
     ctx.fillStyle='#eff5e3';ctx.fillRect(x(Number(this.cursor.value)),0,2,height);
     for(const input of [this.start,this.end]){input.min=this.view[0];input.max=this.view[1];input.value=input===this.start?this.range[0]:this.range[1];}

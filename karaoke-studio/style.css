@@ -96,3 +96,32 @@ main{max-width:1240px;margin:0 auto;padding:0 30px}.hero{display:grid;grid-templ
 .calm-studio *{animation:none!important;transition:none!important;scroll-behavior:auto!important}.calm-studio .reveal{opacity:1!important;transform:none!important}
 
 .session-navigation .studio-menu-button{margin:0;align-self:center;white-space:nowrap}.final-navigation .session-navigation{grid-column:1/-1}.stage-hint{background:transparent;padding-top:8px;padding-bottom:8px}
+
+/* File and record stages fit the earcup. Only mixing has an inner scroll area. */
+.session-frame:not([data-stage="mix"]) .session-content{overflow:hidden;overscroll-behavior:auto}
+.stage-fit>.studio-panel,.stage-fit>.upload-panel{padding:0;border:0;background:none;box-shadow:none}
+.session-frame[data-stage="upload"] .session-content,.session-frame[data-stage="record"] .session-content{padding:10px 24px 12px}
+.session-frame[data-stage="upload"] .drop{min-height:155px;padding:18px}
+.session-frame[data-stage="upload"] .youtube-import{margin:14px 0}
+.session-frame[data-stage="upload"] .panel-title{margin-bottom:12px}
+.session-frame[data-stage="record"] .role-title{font-size:18px;margin:0 0 10px}
+.session-frame[data-stage="record"] .karaoke-display{position:static;min-height:0;padding:12px 16px;margin-bottom:12px}
+.session-frame[data-stage="record"] .lyric-prev{display:none}
+.session-frame[data-stage="record"] .lyric-next{font-size:16px;margin-top:6px}
+.session-frame[data-stage="record"] .lyric-upcoming+.lyric-upcoming{display:none}
+.session-frame[data-stage="record"] .vocal-editor{gap:8px}
+.session-frame[data-stage="record"] .wave-editor{min-height:82px}
+.session-frame[data-stage="record"] .wave-editor canvas,.session-frame[data-stage="record"] .trim-handle{height:82px}
+.session-frame[data-stage="record"] .trim-handle::-webkit-slider-runnable-track{height:82px}
+.session-frame[data-stage="record"] .trim-handle::-webkit-slider-thumb{height:82px}
+.session-frame[data-stage="record"] .trim-handle::-moz-range-track{height:82px}
+.session-frame[data-stage="record"] .trim-handle::-moz-range-thumb{height:78px}
+.session-frame[data-stage="record"] .selection-picker select{padding:8px;margin:0}
+.session-frame[data-stage="record"] .editor-help{font-size:12px}
+.session-frame[data-stage="record"] #recordStatus{margin:8px 0 0;min-height:18px;font-size:12px}
+.session-frame[data-stage="record"] .count-in{position:absolute;inset:40% 40% auto;z-index:8;pointer-events:none;background:#142b34;border:1px solid var(--accent);border-radius:20px;padding:16px;font-size:48px}
+.session-frame[data-stage="record"] #stop{position:static;width:100%;margin:8px 0 0;padding:10px}
+
+.listening-panel .karaoke-display{max-height:none;overflow:visible}.listening-panel .lyric-prev,.listening-panel .lyric-upcoming+.lyric-upcoming{display:none}
+
+.stage-fit{display:flow-root}
