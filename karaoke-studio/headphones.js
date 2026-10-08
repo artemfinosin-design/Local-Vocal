@@ -35,8 +35,8 @@ try {
   light(0xafd9e0, 2.6, -4, 1, 2);
   light(0xff985a, 3, -2, 3, -4);
   const material = (color, roughness, metalness) => new THREE.MeshStandardMaterial({color, roughness, metalness});
-  const shell = new THREE.MeshPhysicalMaterial({color:0x152630,roughness:.32,metalness:.55,clearcoat:.45,clearcoatRoughness:.28});
-  const bandMaterial = material(0x59666e, 0.32, 0.6);
+  const shell = new THREE.MeshPhysicalMaterial({color:0x152630,roughness:.42,metalness:.28,clearcoat:.22,clearcoatRoughness:.4});
+  const bandMaterial = material(0x384851, 0.4, 0.45);
   const cushion = material(0x10171d, 0.88, 0.04);
   const grainCanvas=document.createElement('canvas');grainCanvas.width=grainCanvas.height=128;
   const grain=grainCanvas.getContext('2d'),pixels=grain.createImageData(128,128);let seed=27;
@@ -60,7 +60,7 @@ try {
   };
   const sculpted=(width,height,depth,radius,surface,parent)=>{
     const bevel=Math.min(.025,width*.15,height*.15,depth*.3);
-    const geometry=new THREE.ExtrudeGeometry(roundedShape(width,height,radius),{depth,bevelEnabled:true,bevelSegments:5,steps:1,bevelSize:bevel,bevelThickness:bevel,curveSegments:16});
+    const geometry=new THREE.ExtrudeGeometry(roundedShape(width,height,radius),{depth,bevelEnabled:true,bevelSegments:8,steps:1,bevelSize:bevel,bevelThickness:bevel,curveSegments:48});
     geometry.translate(0,0,-depth/2);return mesh(geometry,surface,parent);
   };
   const arch = mesh(new THREE.TorusGeometry(1.06, 0.11, 18, 80, Math.PI), bandMaterial);
@@ -143,7 +143,7 @@ try {
   floor.rotation.x = Math.PI / 2; floor.position.y = -1.48;
   group.rotation.set(0,0,0);
   const cameraGoal=new THREE.Vector3(),lookGoal=new THREE.Vector3(),looking=new THREE.Vector3();
-  let stage='upload',side=-1,visible=true,last=0,cameraAngle=0,cameraRadius=5.9;
+  let stage='upload',side=-1,visible=true,cameraAngle=0,cameraRadius=5.9,transition=null;
   let screenWidth=700,screenHeight=650,planeWidth=.64,planeHeight=.64;
   function targets() {
     if(stage==='listen'){cameraGoal.set(0,.05,Math.max(4.8,1.7/(Math.tan(Math.PI/10)*camera.aspect)));lookGoal.set(0,-.05,0);return;}
@@ -154,7 +154,7 @@ try {
     const width=host.clientWidth,height=host.clientHeight;if(!width||!height)return;
     renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix();
     screenWidth=Math.min(740,width-60);screenHeight=height-72;planeWidth=planeHeight*screenWidth/screenHeight;
-    for(const cup of Object.values(cups)){cup.scale.z=stage==='listen'?1:Math.max(1,planeWidth/.5*1.1);cup.userData.logo.visible=stage==='listen';}
+    for(const cup of Object.values(cups))cup.userData.logo.visible=stage==='listen';
     targets();
     if(stage!=='listen'){surface.style.width=screenWidth+'px';surface.style.height=screenHeight+'px';}
   }
@@ -162,8 +162,9 @@ try {
     stage=detail.stage;side=stage==='upload'?-1:detail.side?1:-1;
     const bounds=host.getBoundingClientRect();visible=bounds.bottom>0&&bounds.top<innerHeight;
     resize();targets();
+    transition={at:performance.now(),angle:cameraAngle,radius:cameraRadius,y:camera.position.y,look:looking.clone(),scale:cups[-1].scale.z};
     if(stage==='listen'){surface.style.transform='';surface.style.width='';surface.style.height='';surface.style.opacity='1';surface.style.pointerEvents='';surface.inert=false;}
-    if(initial||reduced){cameraAngle=Math.atan2(cameraGoal.x,cameraGoal.z);cameraRadius=Math.hypot(cameraGoal.x,cameraGoal.z);camera.position.copy(cameraGoal);looking.copy(lookGoal);}
+    if(initial||reduced){cameraAngle=Math.atan2(cameraGoal.x,cameraGoal.z);cameraRadius=Math.hypot(cameraGoal.x,cameraGoal.z);camera.position.copy(cameraGoal);looking.copy(lookGoal);transition.angle=cameraAngle;transition.radius=cameraRadius;transition.y=camera.position.y;transition.look.copy(looking);transition.at-=1450;}
   }
   reduced=reduced||!!window.studioAppearance?.calm;
   addEventListener('studio-appearance',()=>{reduced=matchMedia('(prefers-reduced-motion: reduce)').matches||!!window.studioAppearance?.calm;});
@@ -186,13 +187,15 @@ try {
   }
   function render(time) {
     requestAnimationFrame(render);
-    if(!visible){last=0;return;}
-    const dt=last?Math.min((time-last)/1000,.1):1/60;last=time;
-    const speed=reduced?1:1-Math.exp(-dt*9);
-    cameraAngle+=(Math.atan2(cameraGoal.x,cameraGoal.z)-cameraAngle)*speed;
-    cameraRadius+=(Math.hypot(cameraGoal.x,cameraGoal.z)-cameraRadius)*speed;
-    camera.position.set(Math.sin(cameraAngle)*cameraRadius,camera.position.y+(cameraGoal.y-camera.position.y)*speed,Math.cos(cameraAngle)*cameraRadius);
-    looking.lerp(lookGoal,speed);camera.lookAt(looking);renderer.render(scene,camera);projectSurface();
+    if(!visible)return;
+    const progress=reduced?1:Math.min(1,(time-transition.at)/1450),ease=progress*progress*progress*(progress*(progress*6-15)+10);
+    const angle=Math.atan2(cameraGoal.x,cameraGoal.z),delta=Math.atan2(Math.sin(angle-transition.angle),Math.cos(angle-transition.angle));
+    cameraAngle=transition.angle+delta*ease;
+    cameraRadius=THREE.MathUtils.lerp(transition.radius,Math.hypot(cameraGoal.x,cameraGoal.z),ease);
+    camera.position.set(Math.sin(cameraAngle)*cameraRadius,THREE.MathUtils.lerp(transition.y,cameraGoal.y,ease),Math.cos(cameraAngle)*cameraRadius);
+    const scale=stage==='listen'?1:Math.max(1,planeWidth/.5*1.1);
+    for(const cup of Object.values(cups))cup.scale.z=THREE.MathUtils.lerp(transition.scale,scale,ease);
+    looking.lerpVectors(transition.look,lookGoal,ease);camera.lookAt(looking);renderer.render(scene,camera);projectSurface();
   }
   new ResizeObserver(resize).observe(host);
   new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;}).observe(host);

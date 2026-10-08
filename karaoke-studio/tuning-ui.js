@@ -45,7 +45,7 @@
   window.showRenderFeedback=(render,available,diagnostics,saved)=>{
     currentRender=render;currentProject=projectId;
     $('renderRating').dataset.available=available&&render?'yes':'';
-    $('renderRating').hidden=window.studioStage?.stage!=='listen'||!available||!render;
+    $('renderRating').hidden=!available||!render;
     $('ratingStatus').textContent=saved?.score?`Сохранено: ${saved.score}/10 · ${saved.mark==='good'?'хорошо':'есть замечания'}`:'Оценка сохраняется локально. Её можно изменить.';
     $('renderRating').querySelectorAll('[name="renderScore"]').forEach(input=>input.checked=Number(input.value)===saved?.score);
     $('ratingReasons').querySelectorAll('input').forEach(input=>input.checked=!!saved?.reasons?.includes(input.value));
@@ -54,14 +54,18 @@
     const voices=(diagnostics?.voices||[]).filter(v=>v.performance);
     for(const voice of voices){
       const p=voice.performance,card=element('div','performance-card');
-      card.append(element('strong','',roles.find(r=>r.id===voice.role)?.name||'Вокал'));
-      card.append(element('p','',p.hit_percent==null?'Недостаточно уверенно распознанных нот для оценки.':`${p.hit_percent}% в пределах ±½ полутона · типичное отклонение ${p.median_cents} центов`));
-      card.append(element('p','subtle',`Сравнено ${p.compared_seconds} с уверенных нот. Октава голоса учитывается; неясные участки и одобренные спецэффекты пропускаются.`));
-      if(p.summary)card.append(element('h4','coach-summary',p.summary));
-      if(p.range_hz)card.append(element('p','subtle',`Диапазон записи ${p.range_hz.join('–')} Гц · перепад громкости ${p.level_spread_db??'—'} дБ · перегруз ${p.clipping_percent??0}%`));
-      for(const strength of p.strengths||[])card.append(element('p','coach-strength','✓ '+strength));
-      if(p.advice?.length){card.append(element('h4','','Что попробовать'));const tips=element('ul','coach-advice');for(const tip of p.advice)tips.append(element('li','',tip));card.append(tips);}
-      if(p.limits)card.append(element('p','subtle',p.limits));
+      const hero=element('div','performance-hero'),score=element('div','performance-score',p.hit_percent==null?'—':p.hit_percent+'%');
+      score.style.setProperty('--score',(p.hit_percent||0)+'%');score.setAttribute('aria-label','Попадание в ноты: '+(p.hit_percent==null?'недостаточно данных':p.hit_percent+'%'));
+      const heading=element('div');heading.append(element('strong','',roles.find(r=>r.id===voice.role)?.name||'Вокал'),element('p','coach-summary',p.summary||'Попадание в мелодию оригинала'));
+      hero.append(score,heading);card.append(hero);
+      const metrics=element('div','performance-metrics');metrics.append(element('span','',p.hit_percent==null?'Недостаточно нот':'В пределах ±½ полутона'),element('span','',`Отклонение ${p.median_cents??'—'} центов`),element('span','',`Сравнено ${p.compared_seconds} с`));card.append(metrics);
+      for(const strength of (p.strengths||[]).slice(0,1))card.append(element('p','coach-strength','✓ '+strength));
+      if(p.advice?.length){card.append(element('h4','','На следующем дубле'));const tips=element('ul','coach-advice');for(const tip of p.advice.slice(0,2))tips.append(element('li','',tip));card.append(tips);}
+      const measurements=element('details');measurements.append(element('summary','','Подробности и точность оценки'));
+      if(p.range_hz)measurements.append(element('p','subtle',`Диапазон ${p.range_hz.join('–')} Гц · перепад громкости ${p.level_spread_db??'—'} дБ · перегруз ${p.clipping_percent??0}%`));
+      for(const tip of (p.advice||[]).slice(2))measurements.append(element('p','',tip));
+      measurements.append(element('p','subtle','Оценка сухого голоса до автотюна. Октава учитывается; неясные ноты и одобренные спецэффекты пропускаются.'));
+      if(p.limits)measurements.append(element('p','subtle',p.limits));card.append(measurements);
       const line=element('div','performance-timeline');
       for(const segment of p.segments||[]){const b=button(`${seconds(segment.start,true)} · ${segment.hit_percent}%`,()=>{$('result').currentTime=segment.start;});b.title=`Слушать ${seconds(segment.start,true)}–${seconds(segment.end,true)}`;b.style.setProperty('--hit',segment.hit_percent+'%');line.append(b);}
       if(line.childElementCount){const details=element('details');details.append(element('summary','','Попадание по фрагментам'),line);card.append(details);}report.append(card);

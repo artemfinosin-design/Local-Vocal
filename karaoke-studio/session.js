@@ -22,6 +22,8 @@
   const youtubeOptions=document.getElementById('youtubeLoginOptions');youtubeOptions.hidden=false;youtubeDialog.querySelector('.dialog-content').append(youtubeOptions);
   document.getElementById('openYoutubeLogin').addEventListener('click',()=>youtubeDialog.showModal());
   document.getElementById('youtubeLogin').addEventListener('change',()=>{document.getElementById('openYoutubeLogin').textContent=document.getElementById('youtubeLogin').checked?'Вход YouTube разрешён · настройки ↗':'YouTube требует вход? Настроить ↗';});
+  const reviewDialog=dialog('reviewDialog','Твой результат и советы');window.reviewDialog=reviewDialog;reviewDialog.querySelector('.dialog-content').append(review);
+  const openReview=document.createElement('button');openReview.id='openReview';openReview.className='review-launch';openReview.textContent='✦ Разбор пения и оценка';actions.append(openReview);openReview.addEventListener('click',()=>reviewDialog.showModal());
   const menuDialog=dialog('menuDialog','Твоя студия');
   menuDialog.classList.add('studio-menu-dialog');
   const tools=frame.querySelector('.studio-tools');
@@ -32,8 +34,8 @@
   tools.addEventListener('click',event=>{if(event.target.closest('button'))menuDialog.close();},true);
   const toolButton=(id,text,handler)=>{const button=document.createElement('button');button.id=id;button.type='button';button.textContent=text;button.addEventListener('click',handler);tools.append(button);return button;};
   const helpDialog=dialog('helpDialog','Как спеть свою версию');
-  helpDialog.querySelector('.dialog-content').innerHTML='<div class="guide-cards"><article><b>01 · Добавь песню</b><p>Выбери файл или вставь ссылку YouTube. Разделение, поиск текста и разметка партий запускаются автоматически.</p></article><article><b>02 · Запиши голос</b><p>Выбери всю партию или короткий фрагмент. Перед записью звучат отсчёт и три секунды музыки. Ошибку можно перезаписать по выделению.</p></article><article><b>03 · Проверь задержку</b><p>На экране сборки послушай голос с музыкой: минус сдвигает его раньше, плюс — позже. «Студийный» — плавная коррекция; галочка отключает её.</p></article><article><b>04 · Слушай и оцени</b><p>После сборки студия сама откроет прослушивание. Скачай WAV и оцени обработку ниже на странице. Песни сохраняются в «Мои песни».</p></article></div><details class="info-note"><summary>Что происходит с моими файлами?</summary><p>Обработка и личный профиль остаются на компьютере. Интернет нужен для установки, обновлений, YouTube и поиска текста. ZIP с голосом создаётся только по твоему выбору; отправки на сервер нет.</p></details><details class="info-note"><summary>Почему результат иногда отличается?</summary><p>Разделение и распознавание партий могут ошибаться. Эффекты оцениваются по готовому вокалу; точные настройки оригинальных плагинов неизвестны. Если нота не распознана уверенно, коррекция пропускает её.</p></details><p class="subtle">Загрузка и запись помещаются на наушнике без прокрутки. На финальной настройке можно прокручивать задержку и обработку. Небольшая подсказка: логотип любит двойной клик.</p>';
-  toolButton('openHelp','Как пользоваться',()=>helpDialog.showModal());
+  helpDialog.querySelector('.dialog-content').innerHTML='<div class="guide-cards"><article><b>01 · Добавь песню</b><p>Выбери файл или вставь ссылку YouTube. Разделение, поиск текста и разметка партий запускаются автоматически.</p></article><article><b>02 · Запиши голос</b><p>Выбери всю партию или короткий фрагмент. Перед записью звучат отсчёт и три секунды музыки. Перетащи ползунок на ошибку и начни запись: новый дубль заменит только свой участок. Для удаления включи «Убрать лишний вокал».</p></article><article><b>03 · Проверь задержку</b><p>На экране сборки послушай голос с музыкой: минус сдвигает его раньше, плюс — позже. «Студийный» — плавная коррекция; галочка отключает её.</p></article><article><b>04 · Слушай и оцени</b><p>После сборки студия сама откроет прослушивание. Скачай WAV и оцени обработку через кнопку разбора. Песни сохраняются в «Мои песни».</p></article></div><details class="info-note"><summary>Что происходит с моими файлами?</summary><p>Обработка и личный профиль остаются на компьютере. Интернет нужен для установки, обновлений, YouTube и поиска текста. ZIP с голосом создаётся только по твоему выбору; отправки на сервер нет.</p></details><details class="info-note"><summary>Почему результат иногда отличается?</summary><p>Разделение и распознавание партий могут ошибаться. Эффекты оцениваются по готовому вокалу; точные настройки оригинальных плагинов неизвестны. Если нота не распознана уверенно, коррекция пропускает её.</p></details><p class="subtle">Загрузка и запись помещаются на наушнике без прокрутки. На финальной настройке можно прокручивать задержку и обработку. Небольшая подсказка: логотип любит двойной клик.</p>';
+  const helpButton=toolButton('openHelp','? Помощь',()=>helpDialog.showModal());document.querySelector('.topbar').append(helpButton);
   addEventListener('keydown',event=>{if(event.key==='?'&&!event.ctrlKey&&!event.altKey&&!event.metaKey&&!event.target.closest('input,textarea,select,[contenteditable]')&&!document.querySelector('dialog[open]'))helpDialog.showModal();});
   const secretDialog=dialog('secretDialog','Комната звукорежиссёра');
   secretDialog.querySelector('.dialog-content').innerHTML='<div class="guide-cards"><article><b>Секретный дубль № 303</b><p>Звукорежиссёр вышел за чаем. На пульте оставил записку: «Пой ближе к микрофону, дальше от холодильника».</p></article><article><b>Режим суперзвезды</b><p>Уже включён. Для активации нужен только хороший дубль. Блёстки в WAV не экспортируются.</p></article></div><p class="subtle">Ещё один секрет прячется в слове groove. Звук песни эти секреты не меняют.</p>';
@@ -79,33 +81,33 @@
   scrollCue.addEventListener('click',()=>content.scrollBy({top:content.clientHeight*.7,behavior:window.studioAppearance.calm?'auto':'smooth'}));
   content.addEventListener('scroll',updateScrollCue,{passive:true});new ResizeObserver(updateScrollCue).observe(content);new MutationObserver(updateScrollCue).observe(content,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','open']});
   const sourcesDialog=dialog('sourcesDialog','Дорожки и мои дубли');
-  const lyricsPanel=document.createElement('section');lyricsPanel.id='lyricsPanel';lyricsPanel.className='inline-lyrics';lyricsPanel.hidden=true;
-  lyricsPanel.append(document.querySelector('.lyrics-editor'));workspace.insertBefore(lyricsPanel,frame.nextSibling);
+  const lyricsDialog=dialog('lyricsDialog','Текст караоке');lyricsDialog.querySelector('.dialog-content').append(document.querySelector('.lyrics-editor'));
   sourcesDialog.querySelector('.dialog-content').append(panels[0]);
   window.studioDialogs={updates:dialog('updatesDialog','Обновления Local Vocal'),history:dialog('historyDialog','Мои песни'),voice:dialog('voiceDialog','Настрой свой голос'),feedback:dialog('feedbackDialog','Пример для улучшения студии')};
   const library=document.createElement('div');library.id='takeLibrary';sourcesDialog.querySelector('.dialog-content').append(library);
   shell.remove();document.querySelector('.hero').classList.add('intro-only');
   let roleIds=[],roleNames=[],index=0,ready=false,resultReady=false,lastStage='';
   const back=document.getElementById('stageBack'),next=document.getElementById('stageNext');
-  document.getElementById('openLyrics').setAttribute('aria-controls','lyricsPanel');
-  document.getElementById('openLyrics').addEventListener('click',()=>{if(document.body.classList.contains('busy'))return;lyricsPanel.hidden=!lyricsPanel.hidden;document.getElementById('openLyrics').setAttribute('aria-expanded',String(!lyricsPanel.hidden));if(!lyricsPanel.hidden)lyricsPanel.scrollIntoView({block:'start',behavior:'smooth'});});
+  document.getElementById('openLyrics').setAttribute('aria-controls','lyricsDialog');
+  document.getElementById('openLyrics').addEventListener('click',()=>{if(!document.body.classList.contains('busy'))lyricsDialog.showModal();});
   document.getElementById('openSources').addEventListener('click',()=>{if(document.body.classList.contains('busy'))return;sourcesDialog.showModal();});
   function show() {
     const isRole=index>0&&index<=roleIds.length,isMix=index===roleIds.length+1&&index>0,isListen=index===roleIds.length+2&&index>0;
-    upload.hidden=index!==0;record.hidden=!isRole;mix.hidden=!isMix;listen.hidden=!isListen;review.hidden=!isListen||!review.dataset.available;
+    upload.hidden=index!==0;record.hidden=!isRole;mix.hidden=!isMix;listen.hidden=!isListen;review.hidden=!review.dataset.available;openReview.hidden=!isListen;openReview.disabled=!review.dataset.available;
     document.getElementById('openLyrics').disabled=document.getElementById('openSources').disabled=!ready;document.getElementById('openFeedback').disabled=!ready;
     document.querySelectorAll('.track').forEach(track=>track.hidden=!isRole||track.dataset.role!==roleIds[index-1]);
     document.getElementById('stageName').textContent=index===0?'1 / ЗАГРУЗИ ПЕСНЮ':isRole?`${index+1} / ЗАПИСЬ`:isMix?'СОБЕРИ ПЕСНЮ':'СЛУШАЙ';
     back.hidden=index===0;next.hidden=isListen;next.disabled=!ready||(isMix&&!resultReady);
     next.textContent=isMix?'Слушать →':index===0?'К записи →':index===roleIds.length?'Проверить и собрать →':'Следующая партия →';
-    hint.textContent=index===0?'01 · Добавь песню — студия разберёт звук и найдёт текст.':isRole?`${roleNames[index-1]} · Выбери фрагмент и запиши. Остальные партии доступны дальше.`:isMix?'03 · Сначала задержка, затем сборка. Громкость и пространство подбираются автоматически.':'04 · Слушай свою версию. Оценка и разбор пения — ниже на странице.';
+    hint.textContent=index===0?'01 · Добавь песню — студия разберёт звук и найдёт текст.':isRole?`${roleNames[index-1]} · Выбери фрагмент и запиши. Остальные партии доступны дальше.`:isMix?'03 · Сначала задержка, затем сборка. Громкость и пространство подбираются автоматически.':'04 · Слушай свою версию. Оценка и разбор пения — кнопка сверху.';
     hint.hidden=!isMix;updateScrollCue();
-    if(!ready)lyricsPanel.hidden=true;
+    if(!ready)lyricsDialog.close();
     const stage=index===0?'upload':isRole?'record':isMix?'mix':'listen';if(frame.dataset.stage!==stage)content.scrollTop=0;frame.dataset.stage=stage;fitted.hidden=isMix||isListen;fitStage();
     frame.classList.toggle('listening',isListen);document.getElementById('earcupSurface').classList.toggle('final-navigation',isListen);
     const detail={stage:index===0?'upload':isRole?'record':isMix?'mix':'listen',side:index%2,title:document.getElementById('stageName').textContent};
     window.studioStage=detail;
     const key=detail.stage+detail.side;if(key!==lastStage){lastStage=key;dispatchEvent(new CustomEvent('studio-stage',{detail}));}
+    if(isRole)window.noteGuide?.select(projectId,roleIds[index-1]);
     if(isRole)requestAnimationFrame(()=>document.querySelector('.track:not([hidden])')?.querySelector('canvas')&&window.refreshVocalEditors?.());
   }
   const move=amount=>{if(document.body.classList.contains('busy'))return;index=Math.max(0,index+amount);show();content.scrollTop=0;frame.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});};

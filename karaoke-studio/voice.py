@@ -128,3 +128,22 @@ def calibrate(samples):
             'notes_hz': notes, 'noise_rms': noise, 'voice_rms': float(np.median(levels)),
             'confidence': float(np.mean(confidences)), 'clipping': clipping,
             'suggested_input_db': float(np.clip(20 * np.log10(.1 / max(np.median(levels), 1e-8)), -12, 24))}
+
+
+def note_bars(samples):
+    pitch,times,confidence=track_pitch(samples,{'reference':True})
+    from scipy.ndimage import median_filter
+    trusted=(pitch>0)&(confidence>=.65)
+    notes=np.zeros(len(pitch))
+    notes[trusted]=69+12*np.log2(pitch[trusted]/440)
+    edges=np.diff(np.r_[False,trusted,False].astype(int))
+    for start,end in zip(np.flatnonzero(edges==1),np.flatnonzero(edges==-1)):
+        notes[start:end]=median_filter(notes[start:end],size=7,mode='nearest')
+    bars=[]
+    for value,time,trust in zip(notes,times,trusted):
+        if not trust:continue
+        note=int(round(value))
+        if bars and bars[-1]['note']==note and time-bars[-1]['end']<.025:
+            bars[-1]['end']=round(float(time)+.01,3)
+        else:bars.append(dict(start=round(float(time),3),end=round(float(time)+.01,3),note=note))
+    return [bar for bar in bars if round(bar['end']-bar['start'],3)>=.12]

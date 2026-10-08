@@ -1,4 +1,9 @@
 [
+  "karaoke-pages.js",
+  "test_karaoke_pages.js",
+  "note-guide.js",
+  "test_note_guide.js",
+  "test_note_bars.py",
   "LICENSE.txt",
   "THIRD_PARTY.md",
   "youtube.py",
@@ -34,7 +39,6 @@
   "test_desktop.py",
   "setup-desktop.bat",
   "app.ico",
-  "SvoyaVersiya.exe",
   "app.py",
   "audio_core.py",
   "runtime.py",
@@ -45,8 +49,6 @@
   "editor.js",
   "model-ui.js",
   "test_effects.py",
-  "models/vocal-effects.npz",
-  "models/vocal-effects.json",
   "app.js",
   "session.js",
   "visuals.js",
@@ -59,5 +61,6 @@
   "test_core.py",
   "test_upgrade.py",
   "vendor/three.module.min.js",
-  "vendor/three.LICENSE.txt"
+  "vendor/three.LICENSE.txt",
+  "SvoyaVersiya.exe"
 ]

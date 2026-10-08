@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 let projectId, project, roles = [], recording = false, rendering = false, mutating = false, uploading = false, calibrating = false;
 let pollTimer, recorder, recordSession, previewContext, previewGain, previewNodes = [], previewTimer, previewGeneration = 0;
+let lyricPages=[],pageSource=null;
 let lyrics = null, lyricSource = null, lyricFrame, lyricLine = -2, suggestion, analysisPending = false;
 let lyricState='';
 async function request(url, options = {}) {
@@ -33,7 +34,7 @@ updateMonitorVolume();
 window.refreshVocalEditors=()=>roles.forEach(role=>role.editor?.draw());
 function syncControls() {
   document.body.classList.toggle('busy', busy());
-  $('file').disabled = busy(); $('render').disabled = busy()||window.engineCompatible===false; $('stop').hidden = !recording;
+  $('recordBacking').disabled=busy();$('file').disabled = busy(); $('render').disabled = busy()||window.engineCompatible===false; $('stop').hidden = !recording;
   for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button:not(#openHelp):not(#openAppearance),.stage-actions button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
   if(window.engineCompatible===false)document.querySelectorAll('.record-selection').forEach(node=>node.disabled=true);
   $('chooseFile').disabled=busy();$('resumeProject').disabled=busy();
@@ -41,6 +42,7 @@ function syncControls() {
   $('newSong').disabled=recording||rendering||uploading||mutating||calibrating;
   $('openHistory').disabled=$('newSong').disabled;
   if (!busy()) window.studioFlow.show();
+  roles.forEach(role=>role.editor?.refresh());
   for(const audio of document.querySelectorAll('audio')) audio.controls = !recording;
 }
 function pauseAll() { for (const audio of document.querySelectorAll('audio')) audio.pause(); }
@@ -76,7 +78,7 @@ $('youtubeImport').addEventListener('submit', event => {
 });
 function resetProject() {
   stopPreview();pauseAll();roles.forEach(role=>role.editor?.dispose());clearTimeout(pollTimer);
-  projectId=null;project=null;roles=[];analysisPending=false;lyrics=null;lyricLine=-2;suggestion=null;lyricState='';lyricSource=null;cancelAnimationFrame(lyricFrame);
+  $('sessionTitle').textContent='Новый проект';projectId=null;project=null;roles=[];analysisPending=false;lyrics=null;lyricLine=-2;suggestion=null;lyricState='';lyricSource=null;cancelAnimationFrame(lyricFrame);
   for(const id of ['roles','takeLibrary','mixDelays','markers','effectProposalList'])$(id).replaceChildren();
   document.querySelectorAll('audio').forEach(audio=>{audio.removeAttribute('src');audio.load();});
   document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());
@@ -107,7 +109,7 @@ function pollProject() {
         const changed=analysisPending&&state.analysis_state!=='processing';
         analysisPending=state.analysis_state==='processing';
         if (!project || changed) showProject(state);
-        else project=state;
+        else project=state; $('sessionTitle').textContent=state.filename||'Сохранённый проект';
         syncControls();
         $('analysisStatus').textContent=state.analysis_state==='processing' ? 'Обрабатываю вокал и партии. Это может занять несколько минут; записи сохраняются…' : state.analysis_state==='error' ? state.analysis_error : '';
         if (['searching','waiting','processing'].includes(state.lyrics_state) || state.analysis_state==='processing') pollTimer=setTimeout(check,1800);
@@ -124,7 +126,7 @@ function pollProject() {
 }
 function showProject(state) {
   project=state; $('uploadCard').classList.remove('working'); $('status').textContent=`Открыта песня «${state.filename||'Сохранённый проект'}» · ${seconds(state.duration)}. Нажми «Дальше».`;
-  roles.forEach(role=>role.editor?.dispose()); $('roles').replaceChildren(); $('takeLibrary').replaceChildren(); $('mixDelays').replaceChildren(); roles=state.roles.map(role=>({...role}));
+  window.noteGuide?.reset();roles.forEach(role=>role.editor?.dispose()); $('roles').replaceChildren(); $('takeLibrary').replaceChildren(); $('mixDelays').replaceChildren(); roles=state.roles.map(role=>({...role}));
   $('instrumental').src=audioUrl('instrumental'); $('vocals').src=audioUrl('vocals');
   $('songArtist').value=state.song_info?.artist||''; $('songTitle').value=state.song_info?.title||'';
   if(state.lyrics_candidate) showSuggestion(state.lyrics_candidate);
@@ -178,7 +180,7 @@ function paintTakes(role) {
 async function editSegment(role,index,action,range) {
   if (busy()) return; mutating=true; stopPreview(); pauseAll(); syncControls();
   const selected=role.editor.range.slice();
-  try { showProject(await post('segment',{role:role.id,index,action,range}));roles.find(item=>item.id===role.id)?.editor.setRange(selected);window.studioFlow.dirty(); }
+  try { showProject(await post('segment',{role:role.id,index,action,range}));const editor=roles.find(item=>item.id===role.id)?.editor;if(editor){editor.selecting=true;editor.setRange(selected);}window.studioFlow.dirty(); }
   catch(error) { $('recordStatus').textContent=error.message; }
   finally { mutating=false; syncControls(); }
 }
@@ -232,14 +234,15 @@ async function startRecording(role, range=null) {
   if (busy()) return;
   if(window.voiceSetup&&!window.voiceSetup.beforeRecording())return;
   stopPreview(); pauseAll(); recording=true; syncControls();
-  const session=recordSession={cancelled:false,controller:new AbortController()}; let microphone;
+  const session=recordSession={cancelled:false,controller:new AbortController(),role:role.id,cueStart:range?.[0]||0}; let microphone;
   const current=projectId, cue=range||[0,project.duration], start=Math.max(0,cue[0]-3), end=Math.min(project.duration,cue[1]+.6);
   $('recordStatus').textContent='Подключаю микрофон…';
   try {
     if (!window.MediaRecorder || !navigator.mediaDevices) throw new Error('Открой студию в современном браузере по локальному адресу');
     microphone=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
     $('recordStatus').textContent='Подготавливаю музыку к выбранному моменту…';
-    await prepareMusic($('instrumental'),start,session.controller.signal);
+    $('recordingMusic').src=audioUrl($('recordBacking').value);
+    await prepareMusic($('recordingMusic'),start,session.controller.signal);
     for (let count=3;count>0;count--) {
       if (session.cancelled) throw new Error('Отсчёт отменён');
       $('countIn').hidden=false; $('countIn').textContent=count; $('recordStatus').textContent='Приготовься. Музыка начнётся перед выбранным фрагментом.'; await pauseFor(1000);
@@ -250,29 +253,30 @@ async function startRecording(role, range=null) {
     const take=recorder=new MediaRecorder(microphone,mime?{mimeType:mime}:undefined), chunks=[];
     take.ondataavailable=event=>{ if(event.data.size) chunks.push(event.data); };
     take.onstop=async()=>{
-      $('instrumental').pause(); microphone.getTracks().forEach(track=>track.stop()); $('stop').hidden=true; $('recordStatus').textContent='Сохраняю фрагмент…';
+      $('recordingMusic').pause(); window.noteGuide?.stop(); microphone.getTracks().forEach(track=>track.stop()); $('stop').hidden=true; $('recordStatus').textContent='Сохраняю фрагмент…';
       try {
         if (session.cancelled) { $('recordStatus').textContent='Запись отменена'; return; }
-        const stopAt=Math.min(end,Math.max(cue[0],$('instrumental').currentTime));
+        const stopAt=Math.min(end,Math.max(cue[0],$('recordingMusic').currentTime));
         if (stopAt<=cue[0]) throw new Error('Ты остановил запись до начала фрагмента. Попробуй ещё раз.');
         const params=new URLSearchParams({id:current,role:role.id,start,end, cue_start:cue[0],cue_end:Math.min(cue[1],stopAt)});
         const track=await request('/api/track?'+params,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:new Blob(chunks,{type:take.mimeType})});
-        if(current===projectId) { project.tracks.push(track); paintTakes(role); window.studioFlow.dirty(); }
+        if(current===projectId) { project.tracks.push(track); paintTakes(role);role.guide.currentTime=stopAt;role.editor.cursor.value=stopAt;role.editor.refresh(); window.studioFlow.dirty(); }
         $('recordStatus').textContent='Фрагмент сохранён. Можно записать следующий или продолжить.';
       } catch(error) { $('recordStatus').textContent=error.message; }
       finally { recording=false; recorder=null; recordSession=null; syncControls(); }
     };
     take.onerror=()=>{ session.cancelled=true; if(take.state==='recording') take.stop(); };
+    await window.noteGuide?.start(microphone,$('recordingMusic'));
     take.start();
-    try { await $('instrumental').play(); } catch(error) { take.onstop=null; take.stop(); throw error; }
+    try { await $('recordingMusic').play(); } catch(error) { take.onstop=null; take.stop(); throw error; }
     $('recordStatus').textContent=`Запись: ${role.name} · вступление с ${seconds(start)}, пой с ${seconds(cue[0])} до ${seconds(cue[1])}.`; session.end=end;
   } catch(error) {
-    microphone?.getTracks().forEach(track=>track.stop()); recording=false; recorder=null; recordSession=null; $('countIn').hidden=true; syncControls(); $('recordStatus').textContent=error.message;
+    $('recordingMusic').pause();window.noteGuide?.stop();microphone?.getTracks().forEach(track=>track.stop()); recording=false; recorder=null; recordSession=null; $('countIn').hidden=true; syncControls(); $('recordStatus').textContent=error.message;
   }
 }
 $('stop').addEventListener('click',()=>{ if (recorder?.state==='recording') recorder.stop(); else if (recordSession) {recordSession.cancelled=true;recordSession.controller.abort();} });
-$('instrumental').addEventListener('timeupdate',()=>{ if(recorder?.state==='recording' && recordSession?.end && $('instrumental').currentTime>=recordSession.end) recorder.stop(); });
-$('instrumental').addEventListener('ended',()=>{ if(recorder?.state==='recording') recorder.stop(); });
+$('recordingMusic').addEventListener('timeupdate',()=>{ if(recorder?.state==='recording' && recordSession?.end && $('recordingMusic').currentTime>=recordSession.end) recorder.stop(); });
+$('recordingMusic').addEventListener('ended',()=>{ if(recorder?.state==='recording') recorder.stop(); });
 async function render() {
   if(window.engineCompatible===false){$('renderStatus').textContent='Старая фоновая обработка ещё запущена. Перезапусти студию обновлённым ярлыком.';return;}
   if (busy()) return;
@@ -282,40 +286,42 @@ async function render() {
   stopPreview(); pauseAll(); rendering=true; syncControls(); $('renderStatus').textContent='Собираю фрагменты, выравниваю громкость и применяю обработку…';
   try {
     const result=await post('render',{tracks,autotune:$('autotune').checked,tune_mode:$('tuneMode').value,tune_settings:window.tuneSettings?.(),pitch_falls:$('pitchFalls').checked,vocal_db:Number($('vocalGain').value),space:$('space').value});
-    window.showRenderFeedback?.(result.render_id,true,result.diagnostics); window.loadPersonalProfile?.(); $('result').src=result.url; $('download').href=result.url; $('resultBox').hidden=false; window.studioFlow.result(); $('renderStatus').textContent='Готово. Слушай свою версию и оцени обработку ниже.';
+    window.showRenderFeedback?.(result.render_id,true,result.diagnostics); window.loadPersonalProfile?.(); $('result').src=result.url; $('download').href=result.url; $('resultBox').hidden=false; window.studioFlow.result(); $('renderStatus').textContent='Готово. Слушай свою версию и открой «Разбор пения и оценка» над наушниками.';
   } catch(error) { $('renderStatus').textContent=error.message; }
   finally { rendering=false; syncControls(); }
 }
 function paintLyrics(time) {
   const displays=[$('karaokeDisplay'),$('listenLyrics')];
   if(!lyrics?.lines?.length) { for(const display of displays) display.replaceChildren(element('span','subtle',['searching','waiting','processing'].includes(lyricState)?$('lyricsStatus').textContent:'Текст появится автоматически. Свой текст можно добавить через «Текст караоке».')); return; }
+  if(pageSource!==lyrics){pageSource=lyrics;lyricPages=karaokePages(lyrics.lines);lyricLine=-2;}
+  if(!lyricPages.length)return;
   // Keep a phrase on screen through its trailing pause. Do not advance to a
   // future line at its predecessor's end; show the next two lines as context.
   let index=0;
-  for(let at=0;at<lyrics.lines.length;at++){if(lyrics.lines[at].start>time)break;index=at;}
+  for(let at=0;at<lyricPages.length;at++){if(lyricPages[at].start>time)break;index=at;}
   if(index!==lyricLine) {
     lyricLine=index;
     for(const display of displays) {
       const now=element('div','lyric-line');
-      for(const word of lyrics.lines[index].words) {
+      for(const word of lyricPages[index].words) {
         const node=button(word.text+' ',()=>{
           if(busy()) return;
           const role=document.querySelector('.track:not([hidden])')?.dataset.role;
           if(!role) return;
-          roles.find(item=>item.id===role).editor.setRange([Math.max(0,word.start-.1),Math.min(project.duration,word.end+.2)]);
-          $('recordStatus').textContent='Слово выделено на волне. Нажми кнопку записи.';
+          const part=roles.find(item=>item.id===role);part.guide.pause();part.guide.currentTime=word.start;part.editor.cursor.value=word.start;part.editor.refresh();
+          $('recordStatus').textContent='Позиция установлена на слово. Начни запись с ползунка.';
         },'lyric-word');
         if(word.estimated)node.title='Время короткого слова восстановлено приблизительно';
         now.append(node);
       }
       const next=element('div','lyric-next');
-      for(const following of lyrics.lines.slice(index+1,index+3))next.append(element('div','lyric-upcoming',following.words.map(word=>word.text).join(' ')));
-      const previous=lyrics.lines[index-1];
+      for(const following of lyricPages.slice(index+1,index+3))next.append(element('div','lyric-upcoming',following.words.map(word=>word.text).join(' ')));
+      const previous=lyricPages[index-1];
       display.replaceChildren(element('div','lyric-prev',previous?previous.words.map(word=>word.text).join(' '):''),now,next);
     }
   }
   displays.forEach(display=>[...display.querySelectorAll('.lyric-word')].forEach((node,i)=>{
-    const word=lyrics.lines[index].words[i], progress=Math.max(0,Math.min(1,(time-word.start)/Math.max(.05,word.end-word.start)));
+    const word=lyricPages[index].words[i], progress=Math.max(0,Math.min(1,(time-word.start)/Math.max(.05,word.end-word.start)));
     node.style.setProperty('--word-progress',progress*100+'%'); node.classList.toggle('current',time>=word.start&&time<word.end);
   }));
 }

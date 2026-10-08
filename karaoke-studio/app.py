@@ -13,7 +13,7 @@ import webbrowser
 import hashlib
 import tempfile
 from datetime import datetime, timezone
-from voice import calibrate, tuning_options, TUNE_PRESETS
+from voice import calibrate, tuning_options, TUNE_PRESETS, note_bars
 from feedback import make_bundle, selected_takes
 import personalization
 from updater import Updates
@@ -458,7 +458,7 @@ class Handler(BaseHTTPRequestHandler):
             static = {"/": ("index.html", "text/html; charset=utf-8"),
                       "/style.css": ("style.css", "text/css; charset=utf-8"),
                       **{path: (path[1:], "text/javascript; charset=utf-8") for path in
-                         ("/app.js", "/session.js", "/editor.js", "/model-ui.js", "/voice-ui.js", "/tuning-ui.js", "/updates-ui.js", "/history-ui.js", "/effect-ui.js", "/visuals.js", "/headphones.js", "/vendor/three.module.min.js")}}
+                         ("/app.js", "/session.js", "/editor.js", "/model-ui.js", "/voice-ui.js", "/tuning-ui.js", "/updates-ui.js", "/history-ui.js", "/effect-ui.js", "/visuals.js", "/headphones.js", "/note-guide.js", "/karaoke-pages.js", "/vendor/three.module.min.js")}}
             if parsed.path in static:
                 filename, content_type = static[parsed.path]
                 return self.send_file(HERE / filename, content_type)
@@ -519,6 +519,20 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/job":
                 _, job, _ = self.project(query)
                 return self.reply(200, job)
+            if parsed.path == '/api/note-guide':
+                _,job,folder=self.project(query)
+                role=query.get('role',[''])[0]
+                if job['state']!='ready' or role not in {item['id'] for item in job['roles']}:
+                    raise ValueError('Партия пока недоступна')
+                source=folder/('guide-'+role+'.wav');cache=folder/('notes-'+role+'.json')
+                with processing_lock:
+                    stamp=[BACKEND_VERSION,'stable-notes',source.stat().st_mtime_ns,source.stat().st_size]
+                    data=json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else {}
+                    if data.get('stamp')!=stamp:
+                        voice=read_wav(source)
+                        data=dict(stamp=stamp,bars=note_bars(np.mean(voice,axis=1)),duration=job['duration'])
+                        save_meta(cache,data)
+                return self.reply(200,data)
             if parsed.path == '/api/waveform':
                 _, job, folder = self.project(query)
                 role = query.get('role', [''])[0]
