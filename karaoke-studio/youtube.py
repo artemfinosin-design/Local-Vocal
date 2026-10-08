@@ -12,10 +12,12 @@ from runtime import ffmpeg_path
 
 def download_error(message):
     message = message.lower()
-    if '429' in message or 'too many requests' in message:
-        return 'YouTube временно ограничил запросы с этого подключения (429). Подожди и попробуй позже. Если нужна песня сейчас, выбери аудиофайл.'
+    if any(text in message for text in ('cookie database', 'failed to decrypt', 'failed to load cookies', 'cookies database')):
+        return 'Не удалось прочитать вход из браузера. Закрой все его окна и повтори. Если Windows защищает cookies Edge/Chrome, используй Firefox: войди там на YouTube и выбери его в студии.'
     if 'not a bot' in message or 'confirm you' in message:
-        return 'YouTube требует подтверждения «Я не робот» или входа. Загрузчик студии не использует вход из браузера и не может пройти эту проверку. Можно загрузить аудиофайл.'
+        return 'YouTube требует подтверждения входа или «Я не робот». Открой видео в браузере и пройди проверку, затем включи «Использовать мой вход YouTube» и выбери этот браузер. Без галочки студия не использует вход из браузера.'
+    if '429' in message or 'too many requests' in message:
+        return 'YouTube ограничил запросы с этого подключения (429). Не повторяй загрузку подряд. Проверь видео в браузере; если там нужен вход, подтверди его и включи «Использовать мой вход YouTube». Ограничение подключения может сохраняться и после входа.'
     if 'private video' in message or 'members-only' in message or 'age' in message and 'confirm' in message:
         return 'Видео требует доступа к аккаунту или подтверждения возраста. Выбери доступное видео либо аудиофайл.'
     if 'unavailable' in message or 'not available' in message or 'removed' in message:
@@ -50,11 +52,19 @@ def video_url(value):
     return 'https://www.youtube.com/watch?v=' + video
 
 
-def download_audio(url, folder, report, max_bytes, max_duration):
+def browser_source(value):
+    if value is not None and (not isinstance(value,str) or value not in {'edge','chrome','firefox'}):
+        raise ValueError('Выбери Edge, Chrome или Firefox для входа YouTube')
+    return value
+
+
+def download_audio(url, folder, report, max_bytes, max_duration, browser=None):
     from yt_dlp import YoutubeDL
     from yt_dlp.utils import DownloadError
+    from yt_dlp.cookies import CookieLoadError
 
     url = video_url(url)
+    browser=browser_source(browser)
     def check(info, *, incomplete=False):
         if info.get('is_live') or info.get('live_status') in ('is_live', 'is_upcoming'):
             return 'Прямые эфиры не поддерживаются. Выбери готовую песню.'
@@ -90,8 +100,19 @@ def download_audio(url, folder, report, max_bytes, max_duration):
         node = str(node) if node.is_file() else shutil.which('node')
         if node:
             options['js_runtimes'] = {'node': {'path': node}}
+        if browser:
+            options['cookiesfrombrowser']=(browser,)
+            report('Читаю разрешённый вход YouTube из '+browser)
         try:
             with YoutubeDL(options) as downloader:
+                if browser:
+                    jar=downloader.cookiejar
+                    for cookie in list(jar):
+                        domain=cookie.domain.lstrip('.').lower()
+                        if domain!='youtube.com' and not domain.endswith('.youtube.com'):
+                            jar.clear(cookie.domain,cookie.path,cookie.name)
+                    if not len(jar):
+                        raise ValueError('В выбранном браузере нет доступных cookies YouTube. Открой YouTube, войди и пройди проверку. Защищённый вход Edge/Chrome можно заменить входом в Firefox.')
                 info = downloader.extract_info(url, download=True)
                 if not info or info.get('_type') == 'playlist':
                     raise ValueError('Видео недоступно или не подходит для загрузки.')
@@ -117,7 +138,7 @@ def download_audio(url, folder, report, max_bytes, max_duration):
             if info.get('artist'):
                 metadata['artist'] = str(info['artist'])[:200]
             return destination, title + '.m4a', metadata
-        except DownloadError as exc:
+        except (DownloadError,CookieLoadError) as exc:
             details = '\n'.join(warnings + [str(exc)])
             (folder / 'youtube-error.log').write_text(details, encoding='utf-8')
             raise ValueError(download_error(details)) from None

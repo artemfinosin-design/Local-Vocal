@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, urlparse
 from audio_core import analyze, markers, mix, read_wav, read_reference, role_guide, save_meta, write_wav
 from runtime import ffmpeg_path, BACKEND_VERSION
 from lyrics import guess_title, lookup, lrc_lines
-from youtube import video_url, download_audio
+from youtube import video_url, download_audio, browser_source
 from effects import train as train_effects, REPORT, analyze_effects, SPACE_MODES
 
 HERE = Path(__file__).resolve().parent
@@ -170,11 +170,11 @@ def song_info(source, filename):
     return info
 
 
-def import_youtube(job_id, url):
+def import_youtube(job_id, url, browser=None):
     def report(message):
         with lock: jobs[job_id]['state'] = message
     try:
-        source, filename, metadata = download_audio(url, DATA / job_id, report, MAX_UPLOAD, MAX_DURATION)
+        source, filename, metadata = download_audio(url, DATA / job_id, report, MAX_UPLOAD, MAX_DURATION, browser=browser)
         prepare(job_id, source, filename, metadata)
     except Exception as exc:
         with lock: jobs[job_id] = {'state': 'error', 'error': str(exc)[-1800:]}
@@ -694,11 +694,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(body, dict):
                     raise ValueError('Нужна ссылка на видео YouTube')
                 url = video_url(body.get('url'))
+                browser=browser_source(body.get('browser'))
                 job_id = uuid.uuid4().hex
                 (DATA / job_id).mkdir()
                 with lock:
                     jobs[job_id] = {'state': 'Подключаюсь к YouTube', 'source_url': url}
-                threading.Thread(target=import_youtube, args=(job_id, url), daemon=True).start()
+                threading.Thread(target=import_youtube, args=(job_id, url, browser), daemon=True).start()
                 return self.reply(202, {'id': job_id})
             if parsed.path == "/api/upload":
                 filename = query.get("filename", [""])[0]

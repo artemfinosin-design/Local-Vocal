@@ -18,6 +18,10 @@
   listen.innerHTML='<span class="eyebrow">ТВОЯ ВЕРСИЯ ГОТОВА</span><h2>Теперь слушай.</h2><canvas id="waveCanvas" aria-hidden="true"></canvas><button id="listenToggle" class="listen-toggle" aria-label="Воспроизвести готовую песню">▶</button><div id="listenLyrics" class="karaoke-display" aria-live="off"></div>';
   listen.append(document.getElementById('resultBox'));frame.append(listen);const review=document.getElementById('renderRating');workspace.insertBefore(review,frame.nextSibling);const fitted=document.createElement('div');fitted.className='stage-fit';fitted.append(upload,record);content.append(fitted,mix);
   const dialog=(id,title)=>{const node=document.createElement('dialog');node.id=id;node.className='studio-dialog';node.setAttribute('aria-labelledby',id+'-title');node.innerHTML=`<header><div><span class="eyebrow">ИНСТРУМЕНТЫ СТУДИИ</span><h2 id="${id}-title">${title}</h2></div><button class="dialog-close" aria-label="Закрыть окно">✕</button></header><div class="dialog-content"></div>`;node.querySelector('button').addEventListener('click',()=>node.close());node.addEventListener('click',event=>{if(event.target===node){const box=node.getBoundingClientRect();if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)node.close();}});document.body.append(node);return node;};
+  const youtubeDialog=dialog('youtubeDialog','Вход YouTube для загрузки');
+  const youtubeOptions=document.getElementById('youtubeLoginOptions');youtubeOptions.hidden=false;youtubeDialog.querySelector('.dialog-content').append(youtubeOptions);
+  document.getElementById('openYoutubeLogin').addEventListener('click',()=>youtubeDialog.showModal());
+  document.getElementById('youtubeLogin').addEventListener('change',()=>{document.getElementById('openYoutubeLogin').textContent=document.getElementById('youtubeLogin').checked?'Вход YouTube разрешён · настройки ↗':'YouTube требует вход? Настроить ↗';});
   const menuDialog=dialog('menuDialog','Твоя студия');
   menuDialog.classList.add('studio-menu-dialog');
   const tools=frame.querySelector('.studio-tools');
@@ -70,7 +74,7 @@
     });
   }
   new ResizeObserver(fitStage).observe(content);
-  new MutationObserver(fitStage).observe(fitted,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden']});
+  new MutationObserver(fitStage).observe(fitted,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden','open']});
   addEventListener('studio-appearance',fitStage);
   scrollCue.addEventListener('click',()=>content.scrollBy({top:content.clientHeight*.7,behavior:window.studioAppearance.calm?'auto':'smooth'}));
   content.addEventListener('scroll',updateScrollCue,{passive:true});new ResizeObserver(updateScrollCue).observe(content);new MutationObserver(updateScrollCue).observe(content,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','open']});

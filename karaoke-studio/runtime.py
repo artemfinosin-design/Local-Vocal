@@ -2,7 +2,7 @@
 
 import os
 
-BACKEND_VERSION = 23
+BACKEND_VERSION = 24
 import shutil
 from pathlib import Path
 

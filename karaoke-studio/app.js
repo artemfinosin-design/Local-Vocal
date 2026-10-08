@@ -37,7 +37,7 @@ function syncControls() {
   for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button:not(#openHelp):not(#openAppearance),.stage-actions button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
   if(window.engineCompatible===false)document.querySelectorAll('.record-selection').forEach(node=>node.disabled=true);
   $('chooseFile').disabled=busy();$('resumeProject').disabled=busy();
-  $('youtubeUrl').disabled=busy();$('importYoutube').disabled=busy();
+  $('youtubeUrl').disabled=busy();$('importYoutube').disabled=busy();$('youtubeLogin').disabled=busy();$('youtubeBrowser').disabled=busy();
   $('newSong').disabled=recording||rendering||uploading||mutating||calibrating;
   $('openHistory').disabled=$('newSong').disabled;
   if (!busy()) window.studioFlow.show();
@@ -71,7 +71,7 @@ $('youtubeImport').addEventListener('submit', event => {
   const url=$('youtubeUrl').value.trim();
   if (!url || busy()) return;
   importSong('Подключаюсь к YouTube…', () => request('/api/import-youtube', {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url})
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url,browser:$('youtubeLogin').checked?$('youtubeBrowser').value:null})
   }));
 });
 function resetProject() {

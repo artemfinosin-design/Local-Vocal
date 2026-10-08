@@ -125,3 +125,7 @@ main{max-width:1240px;margin:0 auto;padding:0 30px}.hero{display:grid;grid-templ
 .listening-panel .karaoke-display{max-height:none;overflow:visible}.listening-panel .lyric-prev,.listening-panel .lyric-upcoming+.lyric-upcoming{display:none}
 
 .stage-fit{display:flow-root}
+
+.youtube-login{margin:12px 0;font-size:12px}.youtube-login summary{cursor:pointer;color:var(--lime)}.youtube-login .check-option{font-size:14px;margin:12px 0}.youtube-login .control select{margin:5px 0}.youtube-login p{line-height:1.5}
+
+.youtube-login-button{margin:8px 0;font-size:12px}.youtube-login .control{display:block}.youtube-login .control select{display:block;width:100%;max-width:100%}.youtube-login .subtle{font-size:14px;line-height:1.7}
