@@ -14,6 +14,7 @@ import hashlib
 import tempfile
 from datetime import datetime, timezone
 from voice import calibrate, tuning_options, TUNE_PRESETS, note_bars
+from note_charts import parse_ultrastar
 from feedback import make_bundle, selected_takes
 import personalization
 from updater import Updates
@@ -458,7 +459,7 @@ class Handler(BaseHTTPRequestHandler):
             static = {"/": ("index.html", "text/html; charset=utf-8"),
                       "/style.css": ("style.css", "text/css; charset=utf-8"),
                       **{path: (path[1:], "text/javascript; charset=utf-8") for path in
-                         ("/app.js", "/session.js", "/editor.js", "/model-ui.js", "/voice-ui.js", "/tuning-ui.js", "/updates-ui.js", "/history-ui.js", "/effect-ui.js", "/visuals.js", "/headphones.js", "/note-guide.js", "/karaoke-pages.js", "/vendor/three.module.min.js")}}
+                         ("/app.js", "/session.js", "/editor.js", "/model-ui.js", "/voice-ui.js", "/tuning-ui.js", "/updates-ui.js", "/history-ui.js", "/effect-ui.js", "/visuals.js", "/headphones.js", "/note-guide.js", "/karaoke-pages.js", "/players.js", "/vendor/three.module.min.js")}}
             if parsed.path in static:
                 filename, content_type = static[parsed.path]
                 return self.send_file(HERE / filename, content_type)
@@ -524,15 +525,19 @@ class Handler(BaseHTTPRequestHandler):
                 role=query.get('role',[''])[0]
                 if job['state']!='ready' or role not in {item['id'] for item in job['roles']}:
                     raise ValueError('Партия пока недоступна')
+                selected=folder/('notes-'+role+'-manual.json')
                 source=folder/('guide-'+role+'.wav');cache=folder/('notes-'+role+'.json')
                 with processing_lock:
-                    stamp=[BACKEND_VERSION,'stable-notes',source.stat().st_mtime_ns,source.stat().st_size]
+                    if selected.exists():
+                        data=json.loads(selected.read_text(encoding='utf-8'))
+                        return self.reply(200,dict(bars=data['bars'],duration=job['duration'],source='ultrastar',title=data.get('title','')))
+                    stamp=[BACKEND_VERSION,'phrase-notes-v2',source.stat().st_mtime_ns,source.stat().st_size]
                     data=json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else {}
                     if data.get('stamp')!=stamp:
                         voice=read_wav(source)
                         data=dict(stamp=stamp,bars=note_bars(np.mean(voice,axis=1)),duration=job['duration'])
                         save_meta(cache,data)
-                return self.reply(200,data)
+                return self.reply(200,dict(data,source='automatic'))
             if parsed.path == '/api/waveform':
                 _, job, folder = self.project(query)
                 role = query.get('role', [''])[0]
@@ -773,13 +778,41 @@ class Handler(BaseHTTPRequestHandler):
                     if event is None:raise ValueError('Предложение не найдено')
                     event['status']=settings['status'];save_meta(folder/'analysis.json',meta)
                 return self.reply(200,{'status':event['status']})
-            if parsed.path in {'/api/reanalyze', '/api/segment', '/api/lyrics', '/api/lyrics-find'}:
+            if parsed.path in {'/api/reanalyze', '/api/segment', '/api/lyrics', '/api/lyrics-find', '/api/note-chart'}:
                 job_id, job, folder = self.project(query)
                 if job['state'] != 'ready':
                     raise ValueError('Дождись обработки песни')
                 settings = json.loads(self.request_body(100000))
                 if not isinstance(settings, dict):
                     raise ValueError('Неверные параметры')
+                if parsed.path == '/api/note-chart':
+                    role=settings.get('role')
+                    if not isinstance(role,str) or role not in {item['id'] for item in job['roles']}:
+                        raise ValueError('Партия не найдена')
+                    action=settings.get('action')
+                    target=folder/('notes-'+role+'-manual.json')
+                    if action=='clear':
+                        with processing_lock:target.unlink(missing_ok=True)
+                        return self.reply(200,{'source':'automatic'})
+                    if action not in ('preview','apply'):
+                        raise ValueError('Неизвестное действие')
+                    chart=parse_ultrastar(settings.get('text'),job['duration'])
+                    voice=settings.get('voice') or next(iter(chart['voices']))
+                    if not isinstance(voice,str) or voice not in chart['voices']:
+                        raise ValueError('Голос не найден в карте')
+                    offset=settings.get('offset',0)
+                    if isinstance(offset,bool) or not isinstance(offset,(int,float)) or not math.isfinite(offset) or abs(offset)>15:
+                        raise ValueError('Сдвиг нот должен быть от −15 до +15 секунд')
+                    bars=[dict(bar,start=round(max(0,bar['start']+offset),3),end=round(min(job['duration'],bar['end']+offset),3)) for bar in chart['voices'][voice]
+                          if bar['end']+offset>0 and bar['start']+offset<job['duration']]
+                    if not bars:
+                        raise ValueError('Ноты не совпадают по длительности с этой песней')
+                    result=dict(source='ultrastar',title=chart['title'],artist=chart['artist'],voice=voice,
+                                voices=[dict(id=key,name=chart['voice_names'][key],count=len(notes)) for key,notes in chart['voices'].items()],
+                                bars=bars,count=len(bars),first=bars[0]['start'],last=bars[-1]['end'],offset=offset)
+                    if action=='apply':
+                        with processing_lock:save_meta(target,{key:result[key] for key in ('title','artist','voice','bars','offset')})
+                    return self.reply(200,result)
                 if parsed.path == '/api/lyrics-find':
                     candidate = find_project_lyrics(job_id,str(settings.get('artist','')),str(settings.get('title','')))
                     return self.reply(200, candidate)
@@ -885,8 +918,12 @@ class Handler(BaseHTTPRequestHandler):
                     references = {name: read_reference(folder, name) for name in meta["profiles"]}
                     if (folder / 'lead.wav').exists():
                         references.setdefault('lead', read_reference(folder, 'lead'))
+                    score_bars={}
+                    for role in meta['roles']:
+                        chart=folder/('notes-'+role['id']+'-manual.json')
+                        if chart.exists():score_bars[role['id']]=json.loads(chart.read_text(encoding='utf-8'))['bars']
                     diagnostics=[]
-                    result = mix(instrumental, references, tracks, meta, autotune=autotune, vocal_db=vocal_db, space=space, voice_profile=profile, tune_mode=tune_mode, tune_settings=tune_settings, pitch_falls=pitch_falls,diagnostics=diagnostics)
+                    result = mix(instrumental, references, tracks, meta, autotune=autotune, vocal_db=vocal_db, space=space, voice_profile=profile, tune_mode=tune_mode, tune_settings=tune_settings, pitch_falls=pitch_falls,diagnostics=diagnostics,score_bars=score_bars)
                 render_id = uuid.uuid4().hex
                 write_wav(folder / (render_id + ".wav"), result)
                 with lock:

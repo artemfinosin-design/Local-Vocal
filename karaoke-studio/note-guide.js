@@ -55,9 +55,9 @@ if(typeof document!=='undefined')(()=>{
   }
   function stop(){cancelAnimationFrame(frame);source?.disconnect();analyser?.disconnect();if(context)context.close().catch(()=>{});context=source=analyser=null;pitch=null;hit=false;music=null;canvas.classList.remove('note-hit');draw();}
   window.noteGuide={
-    async select(id,role){
-      const next=id+':'+role;if(next===key)return;stop();key=next;const ticket=++generation;bars=[];loading=true;music=roles.find(item=>item.id===role)?.guide||null;status.textContent='Размечаем мелодию…';draw();
-      try{const data=await request(`/api/note-guide?id=${id}&role=${encodeURIComponent(role)}`);if(ticket!==generation)return;bars=data.bars;loading=false;status.textContent='Полоски — мелодия, точка — твой голос';draw();}
+    async select(id,role,force=false){
+      const next=id+':'+role;if(next===key&&!force)return;stop();key=next;const ticket=++generation;bars=[];loading=true;music=roles.find(item=>item.id===role)?.guide||null;status.textContent='Размечаем мелодию…';draw();
+      try{const data=await request(`/api/note-guide?id=${id}&role=${encodeURIComponent(role)}`);if(ticket!==generation)return;bars=data.bars;loading=false;status.textContent=data.source==='ultrastar'?'Ноты из загруженной карты UltraStar · точка — твой голос':'Автоноты из исходного вокала · точка — твой голос';draw();}
       catch(error){if(ticket===generation){loading=false;status.textContent='Ноты недоступны · запись работает';draw();}}
     },
     reset(){++generation;key='';bars=[];music=null;stop();},
@@ -67,4 +67,47 @@ if(typeof document!=='undefined')(()=>{
   document.addEventListener('play',event=>{if(event.target.closest('.track')&&!analyser){music=event.target;cancelAnimationFrame(frame);frame=requestAnimationFrame(draw);}},true);
   document.addEventListener('seeked',event=>{if(event.target===music&&!analyser)draw();},true);
   new ResizeObserver(()=>{if(!analyser)draw();}).observe(canvas);
+  const dialog=document.getElementById('noteChartDialog'),file=document.getElementById('noteChartFile'),role=document.getElementById('noteChartRole'),voice=document.getElementById('noteChartVoice'),offset=document.getElementById('noteChartOffset'),apply=document.getElementById('applyNoteChart'),message=document.getElementById('noteChartStatus');
+  let chartText='',previewToken=0;
+  async function preview(){
+    const ticket=++previewToken;apply.disabled=true;
+    if(!chartText||!projectId)return;
+    message.textContent='Проверяю карту и время нот…';
+    try{
+      const data=await post('note-chart',{action:'preview',role:role.value,voice:voice.value,text:chartText,offset:Number(offset.value)});
+      if(ticket!==previewToken)return;
+      const selected=data.voice;voice.replaceChildren();
+      for(const item of data.voices){const option=new Option(`${item.name} · нот: ${item.count}`,item.id);voice.append(option);}
+      voice.value=selected;
+      document.getElementById('noteChartPreview').textContent=`${data.artist?data.artist+' — ':''}${data.title||'Карта нот'} · нот: ${data.count} · ${seconds(data.first,true)}–${seconds(data.last,true)}. Сравни время первой фразы с песней.`;
+      message.textContent='Карта готова к применению. При другом аудиомонтаже сдвинь ноты ползунком.';apply.disabled=false;
+    }catch(error){if(ticket===previewToken)message.textContent=error.message;}
+  }
+  document.getElementById('openNoteCharts').addEventListener('click',()=>{
+    const title=document.getElementById('songTitle').value||project?.song_info?.title||'',artist=document.getElementById('songArtist').value||project?.song_info?.artist||'';
+    document.getElementById('noteChartSong').textContent=[artist,title].filter(Boolean).join(' — ')||'Укажи название песни в разделе «Текст караоке», чтобы искать её карту.';
+    document.getElementById('noteChartSearch').href=title?'https://www.google.com/search?'+new URLSearchParams({q:`site:usdb.animux.de ${artist} ${title}`}):'https://usdb.animux.de/';
+    role.replaceChildren();for(const part of roles)role.append(new Option(part.name,part.id));
+    const active=key.split(':')[1];if(roles.some(part=>part.id===active))role.value=active;
+    file.value='';chartText='';voice.replaceChildren();offset.value=0;document.getElementById('noteChartOffsetValue').textContent='0,0 с';apply.disabled=true;
+    document.getElementById('noteChartPreview').textContent='Загрузи TXT: появится время первой и последней ноты.';message.textContent='';
+  });
+  file.addEventListener('change',async()=>{
+    const chosen=file.files[0];if(!chosen)return;
+    if(chosen.size>100000){message.textContent='Файл нот больше 100 КБ';return;}
+    chartText=await chosen.text();preview();
+  });
+  role.addEventListener('change',preview);voice.addEventListener('change',preview);
+  offset.addEventListener('input',()=>document.getElementById('noteChartOffsetValue').textContent=Number(offset.value).toFixed(1).replace('.',',')+' с');
+  offset.addEventListener('change',preview);
+  apply.addEventListener('click',async()=>{
+    if(!chartText||busy())return;apply.disabled=true;message.textContent='Сохраняю ноты локально…';
+    try{await post('note-chart',{action:'apply',role:role.value,voice:voice.value,text:chartText,offset:Number(offset.value)});window.studioFlow.dirty();message.textContent='Готово. Карта заменяет автоноты. Для новой оценки пения собери песню снова.';if(key===projectId+':'+role.value)await window.noteGuide.select(projectId,role.value,true);}
+    catch(error){message.textContent=error.message;}finally{apply.disabled=false;}
+  });
+  document.getElementById('clearNoteChart').addEventListener('click',async()=>{
+    if(!projectId||busy())return;message.textContent='Возвращаю авторазметку…';
+    try{await post('note-chart',{action:'clear',role:role.value});window.studioFlow.dirty();message.textContent='Для этой партии снова используются автоноты. Для новой оценки собери песню снова.';if(key===projectId+':'+role.value)await window.noteGuide.select(projectId,role.value,true);}
+    catch(error){message.textContent=error.message;}
+  });
 })();

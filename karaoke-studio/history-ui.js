@@ -13,7 +13,7 @@
         card.append(element('p','subtle',`${seconds(song.duration)} · Дублей: ${song.takes}${date?' · '+date:''}`));
         if(song.render){const audio=element('audio');audio.controls=true;audio.preload='none';audio.src=`/api/audio?id=${song.id}&name=${song.render}`;card.append(audio);}
         const actions=element('div','voice-actions');
-        actions.append(button('Открыть песню',()=>{if(changing)return;resetProject();projectId=song.id;localStorage.setItem('karaokeProject',projectId);historyUrl();pollProject();}));
+        actions.append(button('Редактировать песню',async event=>{if(changing)return;changing=true;const node=event.currentTarget;node.disabled=true;node.textContent='Открываю проект…';try{await openSavedProject(song.id);}catch(error){if(!dialog.open)dialog.showModal();let status=card.querySelector('.history-error');if(!status){status=element('p','status history-error');status.setAttribute('role','alert');card.append(status);}status.textContent='Не удалось открыть проект: '+error.message;}finally{changing=false;node.disabled=false;node.textContent='Редактировать песню';}}));
         if(song.render){const download=element('a','preview-button','Скачать WAV');download.href=`/api/audio?id=${song.id}&name=${song.render}`;download.download=song.filename.replace(/\.[^.]+$/,'')+' — моя версия.wav';actions.append(download);}
         actions.append(button('Удалить',()=>{if(changing)return;actions.replaceChildren(element('span','subtle','Переместить песню и все её дубли в корзину?'),button('Да, удалить',()=>change('delete',song.id)),button('Отмена',refresh));}));
         card.append(actions);content.append(card);
@@ -25,7 +25,6 @@
       }
     }catch(error){content.append(element('p','status',error.message));}
   }
-  function historyUrl(){history.replaceState(null,'','?project='+projectId+'#sessionStage');}
   async function change(action,id){
     if(changing)return;changing=true;content.querySelectorAll('button').forEach(node=>node.disabled=true);pauseAll();
     let failure;

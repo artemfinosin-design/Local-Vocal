@@ -1,4 +1,8 @@
 [
+  "note_charts.py",
+  "test_note_charts.py",
+  "players.js",
+  "test_players.js",
   "karaoke-pages.js",
   "test_karaoke_pages.js",
   "note-guide.js",
@@ -39,6 +43,7 @@
   "test_desktop.py",
   "setup-desktop.bat",
   "app.ico",
+  "SvoyaVersiya.exe",
   "app.py",
   "audio_core.py",
   "runtime.py",
@@ -61,6 +66,5 @@
   "test_core.py",
   "test_upgrade.py",
   "vendor/three.module.min.js",
-  "vendor/three.LICENSE.txt",
-  "SvoyaVersiya.exe"
+  "vendor/three.LICENSE.txt"
 ]

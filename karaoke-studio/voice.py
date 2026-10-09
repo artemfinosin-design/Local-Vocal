@@ -132,8 +132,10 @@ def calibrate(samples):
 
 def note_bars(samples):
     pitch,times,confidence=track_pitch(samples,{'reference':True})
-    from scipy.ndimage import median_filter
+    from scipy.ndimage import median_filter, uniform_filter1d
     trusted=(pitch>0)&(confidence>=.65)
+    # One isolated periodic sound is usually an instrument leaking into the vocal stem.
+    trusted &= uniform_filter1d(trusted.astype(float),size=81,mode='constant')>=.20
     notes=np.zeros(len(pitch))
     notes[trusted]=69+12*np.log2(pitch[trusted]/440)
     edges=np.diff(np.r_[False,trusted,False].astype(int))
@@ -143,7 +145,7 @@ def note_bars(samples):
     for value,time,trust in zip(notes,times,trusted):
         if not trust:continue
         note=int(round(value))
-        if bars and bars[-1]['note']==note and time-bars[-1]['end']<.025:
+        if bars and bars[-1]['note']==note and time-bars[-1]['end']<.055:
             bars[-1]['end']=round(float(time)+.01,3)
         else:bars.append(dict(start=round(float(time),3),end=round(float(time)+.01,3),note=note))
-    return [bar for bar in bars if round(bar['end']-bar['start'],3)>=.12]
+    return [bar for bar in bars if round(bar['end']-bar['start'],3)>=.06]

@@ -285,7 +285,7 @@ def markers(meta):
     return found[:80]
 
 
-def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, diagnostics=None, excluded=None):
+def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, diagnostics=None, excluded=None, score_bars=None):
     """Correct trusted voiced regions while keeping the recorded waveform."""
     from scipy.ndimage import median_filter
     from pitch_shift import shift_waveform
@@ -351,8 +351,19 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
             'correction_cents':np.percentile(abs(correction[reliable])*100,[50,90]).tolist() if np.any(reliable) else [],
             'input_rms':float(np.sqrt(np.mean(np.asarray(voice,dtype=float)**2))),
             'profile_revision':int((profile or {}).get('adaptive_revision',0))})
-        diagnostics[-1]['performance']=performance_report(raw_distance,paired,times)
-        diagnostics[-1]['performance'].update(vocal_report(voice,reference,user,times,confidence,paired,raw_distance))
+        score_paired,score_distance=paired,raw_distance
+        if score_bars:
+            target=np.full(len(times),np.nan)
+            for bar in score_bars:
+                lo,hi=np.searchsorted(times,[bar['start'],bar['end']])
+                target[lo:hi]=bar['note']
+            score_paired=(user>0)&(confidence>.7)&np.isfinite(target)
+            for start,end in excluded or []:score_paired[(times>=start)&(times<=end)]=False
+            score_distance=np.zeros_like(user)
+            score_distance[score_paired]=target[score_paired]-(69+12*np.log2(user[score_paired]/440))
+        diagnostics[-1]['performance']=performance_report(score_distance,score_paired,times)
+        diagnostics[-1]['performance'].update(vocal_report(voice,reference,user,times,confidence,score_paired,score_distance))
+        diagnostics[-1]['performance']['source']='ultrastar' if score_bars else 'original'
         diagnostics[-1]['timbre']=voice_timbre(voice)
     return result
 
@@ -362,13 +373,16 @@ def performance_report(distance,paired,times):
     error=abs((distance+6)%12-6)*100
     count=int(np.count_nonzero(paired))
     report=dict(compared_seconds=round(count*.01,2),tolerance_cents=50,
-                coverage_percent=round(100*count/max(1,len(times)),1),segments=[])
+                coverage_percent=round(100*count/max(1,len(times)),1),segments=[],live_segments=[])
     if count<100:return report
     report.update(hit_percent=round(float(np.mean(error[paired]<=50))*100,1),
                   median_cents=round(float(np.median(error[paired])),1))
     for start in np.arange(0,times[-1],5):
         mask=paired&(times>=start)&(times<start+5)
         if np.count_nonzero(mask)>=50:report['segments'].append(dict(start=float(start),end=float(min(start+5,times[-1])),hit_percent=round(float(np.mean(error[mask]<=50))*100,1)))
+    for start in np.arange(0,times[-1],.5):
+        mask=paired&(times>=start)&(times<start+.5)
+        if np.count_nonzero(mask)>=20:report['live_segments'].append(dict(start=round(float(start),2),end=round(float(min(start+.5,times[-1])),2),hit_percent=round(float(np.mean(error[mask]<=50))*100,1)))
     return report
 
 
@@ -502,7 +516,7 @@ def exclusion_envelope(role, total):
     return envelope
 
 
-def mix(instrumental, references, tracks, meta, autotune=True, vocal_db=0, space='auto', voice_profile=None, tune_mode='gentle', tune_settings=None, pitch_falls=True, diagnostics=None):
+def mix(instrumental, references, tracks, meta, autotune=True, vocal_db=0, space='auto', voice_profile=None, tune_mode='gentle', tune_settings=None, pitch_falls=True, diagnostics=None, score_bars=None):
     """Combine clips by role (latest overlap wins), then process each assembled voice once."""
     if instrumental.shape[1] == 1:
         instrumental = np.repeat(instrumental, 2, axis=1)
@@ -564,7 +578,7 @@ def mix(instrumental, references, tracks, meta, autotune=True, vocal_db=0, space
         before=len(diagnostics) if diagnostics is not None else 0
         options=dict(tune_settings or {})
         if not autotune:options['strength']=0
-        aligned = pitch_match(aligned,pitch_source if pitch_source is not None else source,voice_profile,tune_mode,options,diagnostics,excluded)
+        aligned = pitch_match(aligned,pitch_source if pitch_source is not None else source,voice_profile,tune_mode,options,diagnostics,excluded,(score_bars or {}).get(role_id))
         if diagnostics is not None and len(diagnostics)>before:diagnostics[-1]['role']=role_id
         aligned = vocal_dynamics(_tone_match(aligned, source, sample_mask, voice_profile))
         if pitch_falls:

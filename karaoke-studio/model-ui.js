@@ -2,7 +2,7 @@
 (() => {
   const panel=document.createElement('section');panel.className='learning-panel';
   panel.innerHTML='<span class="eyebrow">ЛОКАЛЬНОЕ ОБУЧЕНИЕ</span><h3>Научи студию слышать обработку</h3><p>Студия учится на вокале новых песен. Можно добавить отдельную вокальную дорожку. Она создаст примеры с известными эффектами, обучится и проверит себя на других фрагментах. Используются только параметры, прошедшие проверку и подтверждённые анализом сигнала. Эхо и стерео измеряются отдельно: прогноз модели не включает эхо сам по себе.</p><label class="button" role="button" tabindex="0">Добавить пример вокала<input id="effectExample" type="file" accept=".mp3,.wav,.flac,.m4a,.ogg,.aac" hidden></label><p id="effectModelStatus" role="status"></p><p class="hint">Вокал из готовой песни уже содержит эффекты. Такое обучение распознаёт добавленную обработку и не восстанавливает исходную цепочку плагинов точно.</p>';
-  document.querySelector('#sourcesDialog .dialog-content').prepend(panel);
+  document.getElementById('sourceLearning').append(panel);
   const input=panel.querySelector('input'),status=panel.querySelector('[role="status"]');let timer;
   async function refresh() {
     clearTimeout(timer);

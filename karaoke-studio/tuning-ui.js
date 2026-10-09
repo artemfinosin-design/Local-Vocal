@@ -30,6 +30,39 @@
 /* Local adaptation is visible, reversible, and separate from microphone calibration. */
 (() => {
   let currentRender=null,currentProject=null;
+  const playback=$('result'),meter=element('section','playback-score');
+  meter.id='playbackScore';
+  meter.innerHTML='<span class="eyebrow">ПОПАДАНИЕ В МЕЛОДИЮ</span><div class="playback-score-reading"><strong id="playbackScoreValue">—</strong><span>%</span></div><div id="playbackScoreTrack" class="playback-score-track" role="progressbar" aria-label="Попадание в ноты на текущем участке" aria-valuemin="0" aria-valuemax="100"><i></i></div><p id="playbackScoreHint">Начни слушать свою версию</p><button id="listenReview" type="button">✦ Вся оценка и советы</button>';
+  document.querySelector('.listening-panel').append(meter);
+  $('listenReview').addEventListener('click',()=>$('openReview').click());
+  let scoreVoices=[],lastScore=null,lastCue=-Infinity,cueContext;
+  function cue(){
+    if(!monitorVolume)return;
+    try{
+      cueContext ||= new AudioContext();cueContext.resume();
+      const now=cueContext.currentTime;
+      for(const [frequency,delay] of [[660,0],[990,.09]]){
+        const tone=cueContext.createOscillator(),gain=cueContext.createGain();tone.type='sine';tone.frequency.value=frequency;
+        gain.gain.setValueAtTime(0,now+delay);gain.gain.linearRampToValueAtTime(.018*monitorVolume,now+delay+.012);gain.gain.exponentialRampToValueAtTime(.0001,now+delay+.18);
+        tone.connect(gain).connect(cueContext.destination);tone.start(now+delay);tone.stop(now+delay+.19);
+      }
+    }catch{}
+  }
+  function paintPlaybackScore(){
+    const time=playback.currentTime,values=scoreVoices.flatMap(performance=>{
+      const segments=performance.live_segments?.length?performance.live_segments:performance.segments||[];
+      return segments.filter(item=>item.start<=time&&time<item.end).map(item=>item.hit_percent);
+    });
+    const value=values.length?Math.round(values.reduce((sum,item)=>sum+item,0)/values.length):null;
+    $('playbackScoreValue').textContent=value===null?'—':String(value);
+    $('playbackScoreTrack').style.setProperty('--score',value===null?'0%':value+'%');
+    $('playbackScoreTrack').setAttribute('aria-valuenow',value===null?'':String(value));
+    $('playbackScoreHint').textContent=value===null?'Здесь нет уверенно сравнимых нот':value>=90?'Точно в мелодию!':value>=60?'Хороший фрагмент':'Этот фрагмент можно повторить';
+    meter.classList.toggle('score-peak',value!==null&&value>=90);
+    if(!playback.paused&&!playback.seeking&&value!==null&&value>=90&&(lastScore===null||lastScore<90)&&Date.now()-lastCue>3000){cue();lastCue=Date.now();}
+    lastScore=value;
+  }
+  for(const event of ['timeupdate','seeked','play','pause','emptied'])playback.addEventListener(event,paintPlaybackScore);
   function paint(personal){
     $('personalEnabled').checked=personal.enabled;
     const range=personal.range_hz?` · рабочий диапазон ${Math.round(personal.range_hz[0])}–${Math.round(personal.range_hz[1])} Гц`:'';
@@ -44,6 +77,8 @@
   $('resetPersonal').addEventListener('click',async()=>{if(busy())return;if(!confirming){confirming=true;$('resetPersonal').textContent='Подтвердить сброс профиля';return;}await change({action:'reset'});confirming=false;$('resetPersonal').textContent='Сбросить личный профиль';});
   window.showRenderFeedback=(render,available,diagnostics,saved)=>{
     currentRender=render;currentProject=projectId;
+    scoreVoices=(diagnostics?.voices||[]).map(voice=>voice.performance).filter(Boolean);lastScore=null;paintPlaybackScore();
+    meter.querySelector('.eyebrow').textContent=scoreVoices.some(voice=>voice.source==='ultrastar')?'ПОПАДАНИЕ В НОТЫ КАРТЫ':'ПОПАДАНИЕ В МЕЛОДИЮ';
     $('renderRating').dataset.available=available&&render?'yes':'';
     $('renderRating').hidden=!available||!render;
     $('ratingStatus').textContent=saved?.score?`Сохранено: ${saved.score}/10 · ${saved.mark==='good'?'хорошо':'есть замечания'}`:'Оценка сохраняется локально. Её можно изменить.';
@@ -57,6 +92,7 @@
       const hero=element('div','performance-hero'),score=element('div','performance-score',p.hit_percent==null?'—':p.hit_percent+'%');
       score.style.setProperty('--score',(p.hit_percent||0)+'%');score.setAttribute('aria-label','Попадание в ноты: '+(p.hit_percent==null?'недостаточно данных':p.hit_percent+'%'));
       const heading=element('div');heading.append(element('strong','',roles.find(r=>r.id===voice.role)?.name||'Вокал'),element('p','coach-summary',p.summary||'Попадание в мелодию оригинала'));
+      if(p.source==='ultrastar')heading.append(element('p','subtle','Сравнение с загруженной картой UltraStar.'));
       hero.append(score,heading);card.append(hero);
       const metrics=element('div','performance-metrics');metrics.append(element('span','',p.hit_percent==null?'Недостаточно нот':'В пределах ±½ полутона'),element('span','',`Отклонение ${p.median_cents??'—'} центов`),element('span','',`Сравнено ${p.compared_seconds} с`));card.append(metrics);
       for(const strength of (p.strengths||[]).slice(0,1))card.append(element('p','coach-strength','✓ '+strength));

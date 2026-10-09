@@ -35,7 +35,7 @@ window.refreshVocalEditors=()=>roles.forEach(role=>role.editor?.draw());
 function syncControls() {
   document.body.classList.toggle('busy', busy());
   $('recordBacking').disabled=busy();$('file').disabled = busy(); $('render').disabled = busy()||window.engineCompatible===false; $('stop').hidden = !recording;
-  for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button:not(#openHelp):not(#openAppearance),.stage-actions button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
+  for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button:not(#openHelp):not(#openAppearance),.stage-actions button,.studio-sidebar button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
   if(window.engineCompatible===false)document.querySelectorAll('.record-selection').forEach(node=>node.disabled=true);
   $('chooseFile').disabled=busy();$('resumeProject').disabled=busy();
   $('youtubeUrl').disabled=busy();$('importYoutube').disabled=busy();$('youtubeLogin').disabled=busy();$('youtubeBrowser').disabled=busy();
@@ -44,6 +44,7 @@ function syncControls() {
   if (!busy()) window.studioFlow.show();
   roles.forEach(role=>role.editor?.refresh());
   for(const audio of document.querySelectorAll('audio')) audio.controls = !recording;
+  window.syncAudioPlayers?.();
 }
 function pauseAll() { for (const audio of document.querySelectorAll('audio')) audio.pause(); }
 function element(tag, className, text) {
@@ -89,6 +90,14 @@ function resetProject() {
   history.replaceState(null,'',location.pathname+'#sessionStage');
   paintLyrics(0);window.studioFlow.uploading();syncControls();
   window.showRenderFeedback?.(null,false);
+}
+async function openSavedProject(id) {
+  if(busy())throw new Error('Сначала закончи запись или обработку.');
+  const state=await request('/api/job?id='+encodeURIComponent(id));
+  if(state.state!=='ready')throw new Error('Эта песня пока не готова к редактированию: '+(state.error||state.state));
+  resetProject();projectId=id;localStorage.setItem('karaokeProject',id);history.replaceState(null,'','?project='+id+'#sessionStage');
+  lyricState=state.lyrics_state||'';lyrics=state.lyrics||null;lyricLine=-2;paintLyrics(0);
+  showProject(state);window.studioFlow.edit();syncControls();pollProject();
 }
 function pollProject() {
   const current=projectId; clearTimeout(pollTimer);
@@ -286,7 +295,7 @@ async function render() {
   stopPreview(); pauseAll(); rendering=true; syncControls(); $('renderStatus').textContent='Собираю фрагменты, выравниваю громкость и применяю обработку…';
   try {
     const result=await post('render',{tracks,autotune:$('autotune').checked,tune_mode:$('tuneMode').value,tune_settings:window.tuneSettings?.(),pitch_falls:$('pitchFalls').checked,vocal_db:Number($('vocalGain').value),space:$('space').value});
-    window.showRenderFeedback?.(result.render_id,true,result.diagnostics); window.loadPersonalProfile?.(); $('result').src=result.url; $('download').href=result.url; $('resultBox').hidden=false; window.studioFlow.result(); $('renderStatus').textContent='Готово. Слушай свою версию и открой «Разбор пения и оценка» над наушниками.';
+    window.showRenderFeedback?.(result.render_id,true,result.diagnostics); window.loadPersonalProfile?.(); $('result').src=result.url; $('download').href=result.url; $('resultBox').hidden=false; window.studioFlow.result(); $('renderStatus').textContent='Готово. Слушай свою версию и открой «Разбор пения» слева.';
   } catch(error) { $('renderStatus').textContent=error.message; }
   finally { rendering=false; syncControls(); }
 }
@@ -378,6 +387,6 @@ else {
   if(saved&&/^[a-f0-9]{32}$/.test(saved))request('/api/job?id='+saved).then(state=>{
     if(projectId||uploading||state.state!=='ready')return;
     $('resumeProject').textContent='Продолжить прошлую песню: '+(state.filename||'сохранённый проект');$('resumeProject').hidden=false;
-    $('resumeProject').onclick=()=>{if(busy())return;projectId=saved;$('resumeProject').hidden=true;history.replaceState(null,'','?project='+saved+'#sessionStage');pollProject();};
+    $('resumeProject').onclick=()=>openSavedProject(saved).catch(error=>$('status').textContent='Не удалось открыть песню: '+error.message);
   }).catch(()=>{});
 }
