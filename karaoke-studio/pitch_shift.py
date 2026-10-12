@@ -36,7 +36,15 @@ def shift_waveform(voice, pitch, times, correction, reliable):
     if len(changed)!=len(voice) or not np.isfinite(changed).all():
         raise ValueError('Коррекция нот вернула некорректный звук')
     # Keep consonants, breaths and uncertain/polyphonic regions dry.
-    gate=np.interp(np.arange(len(voice))/RATE,times,eligible.astype(float),left=0,right=0)
+    resynthesized=eligible.copy()
+    edges=np.diff(np.r_[False,eligible,False].astype(int))
+    starts=np.flatnonzero(edges==1);ends=np.flatnonzero(edges==-1)
+    for lo,hi in zip(ends[:-1],starts[1:]):
+        # Repeated dry/wet crossfades inside a steady vowel cause cancellation.
+        # Keep its native pitch in brief tolerance gaps; uncertainty stays dry.
+        if hi-lo<=5 and np.all(reliable[lo:hi]) and np.all(pitch[lo:hi]>0):
+            resynthesized[lo:hi]=True
+    gate=np.interp(np.arange(len(voice))/RATE,times,resynthesized.astype(float),left=0,right=0)
     gate=uniform_filter1d(gate,round(.02*RATE),mode='constant')
     output=(voice*(1-gate)+changed*gate).astype(np.float32)
     return output,int(np.count_nonzero(eligible))

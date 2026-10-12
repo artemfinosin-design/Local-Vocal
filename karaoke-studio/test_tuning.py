@@ -7,6 +7,20 @@ from voice import tuning_options,tuning_profile
 import app
 
 class TuningChecks(unittest.TestCase):
+    def test_short_tolerance_gaps_do_not_create_volume_flutter(self):
+        from voice import track_pitch
+        from pitch_shift import shift_waveform
+        t=np.arange(RATE*6)/RATE
+        voice=(.08*np.sin(2*np.pi*220*t)+.03*np.sin(2*np.pi*440*t)).astype(np.float32)
+        f,at,c=track_pitch(voice)
+        correction=np.full(len(at),.08)
+        correction[((at/.16)%1)>.75]=0
+        out,_=shift_waveform(voice,f,at,correction,(f>0)&(c>.7))
+        def rms(x):return np.sqrt(np.mean(x.reshape(-1,441)**2,axis=1))
+        ratio=(rms(out)/rms(voice))[50:-50]
+        self.assertGreater(float(np.percentile(ratio,1)),.8)
+        self.assertLess(float(np.std(ratio)),.08)
+
     def test_uncorrected_phrase_is_exact_when_another_phrase_is_tuned(self):
         from voice import track_pitch
         from pitch_shift import shift_waveform
@@ -19,6 +33,17 @@ class TuningChecks(unittest.TestCase):
         changed,when,confidence=track_pitch(result)
         active=(when>2)&(when<2.7)&(changed>0)&(confidence>.7)
         self.assertAlmostEqual(float(np.median(changed[active])),220*2**(1.5/12),delta=2)
+
+    def test_short_uncertain_gap_stays_dry(self):
+        from voice import track_pitch
+        from pitch_shift import shift_waveform
+        t=np.arange(RATE*3)/RATE
+        voice=(.08*np.sin(2*np.pi*220*t)+.03*np.sin(2*np.pi*440*t)).astype(np.float32)
+        f,at,c=track_pitch(voice)
+        reliable=(f>0)&(c>.7)
+        reliable[(at>=1)&(at<1.05)]=False
+        out,_=shift_waveform(voice,f,at,np.full(len(at),.08),reliable)
+        np.testing.assert_array_equal(out[round(1.021*RATE):round(1.029*RATE)],voice[round(1.021*RATE):round(1.029*RATE)])
 
     def test_one_delay_throw_does_not_spread_across_later_singing(self):
         from unittest.mock import patch
@@ -122,7 +147,7 @@ class TuningChecks(unittest.TestCase):
         rms=[np.sqrt(np.mean(result[i:i+2205]**2)) for i in range(RATE,7*RATE,2205)]
         self.assertLess(float(np.std(rms)/np.mean(rms)),.08)
         self.assertGreater(logs[0]['processed_seconds'],6)
-        self.assertEqual(logs[0]['engine'],'praat-psola-v3')
+        self.assertEqual(logs[0]['engine'],'praat-psola-v4')
     def test_reference_crossing_tritone_does_not_flip_target_octave(self):
         from voice import track_pitch
         t=np.arange(RATE*5)/RATE
