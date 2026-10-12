@@ -23,6 +23,27 @@ def slide(tape=True):
     x*=.15/max(abs(x));return x.astype(np.float32)
 
 class FallChecks(unittest.TestCase):
+    def test_three_copies_with_internal_peaks_and_fast_chops_are_detected(self):
+        rng=np.random.default_rng(71)
+        template=rng.normal(0,.08,round(.17*RATE)).astype(np.float32)
+        t=np.arange(len(template))/RATE
+        template*=np.exp(-((t-.025)/.012)**2)+.7*np.exp(-((t-.105)/.015)**2)
+        voice=np.zeros(RATE*3,np.float32)
+        for at in (.5,1,1.5):
+            lo=round(at*RATE);voice[lo:lo+len(template)]=template
+        events=analyze_stutters(voice)
+        self.assertEqual(len(events),1)
+        self.assertEqual(events[0]['repeat_count'],3)
+
+    def test_late_first_syllable_does_not_delay_every_repeat(self):
+        v=np.zeros(RATE*2,np.float32)
+        rng=np.random.default_rng(4);pulse=rng.normal(0,.1,round(.08*RATE)).astype(np.float32)
+        lo=round(.59*RATE);v[lo:lo+len(pulse)]=pulse
+        event=dict(start=.5,end=1.5,onsets=[.5,.8,1.1],template_start=.5,template_end=.78)
+        out=render_stutters(v,[event])
+        self.assertGreater(float(np.std(out[round(.81*RATE):round(.86*RATE)])),.02)
+        self.assertLess(float(np.max(abs(out[round(.95*RATE):RATE]))),1e-7)
+
     def test_legacy_uncertain_drop_is_not_rendered(self):
         v=slide(False)
         np.testing.assert_array_equal(render_pitch_falls(v,[dict(uncertain_middle=True)]),v)
@@ -66,13 +87,21 @@ class FallChecks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory,patch.object(app,'DATA',Path(directory)),patch.object(app,'jobs',{}):
             identity='d'*32;folder=Path(directory)/identity;folder.mkdir()
             app.jobs[identity]={'state':'ready'}
-            save_meta(folder/'analysis.json',{'effect_proposals':[dict(id='fall',type='estimated_pitch_fall',reference='vocals',start=1,end=2,status='pending')]})
+            save_meta(folder/'analysis.json',{'profiles':{'vocals':{'pan':[],'echo':[]}},'hop':.25,'roles':[], 'effect_proposals':[dict(id='fall',type='estimated_pitch_fall',reference='vocals',start=1,end=2,status='approved')]})
+            from audio_core import write_wav
+            write_wav(folder/'vocals.wav',np.zeros((RATE,2),np.float32))
             server=app.StudioServer(('127.0.0.1',0),app.Handler)
             worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
             base=f'http://127.0.0.1:{server.server_port}'
             def decision(data):return urlopen(Request(base+'/api/effect-decision?id='+identity,json.dumps(data).encode(),{'Content-Type':'application/json'}))
             try:
-                with urlopen(base+'/api/effect-proposals?id='+identity) as response:self.assertEqual(json.load(response)['proposals'][0]['status'],'pending')
+                detected=dict(type='estimated_stutter',start=.2,end=.8,repeat_count=3)
+                with patch('app.analyze_stutters',return_value=[detected]) as detector:
+                    with urlopen(base+'/api/effect-proposals?id='+identity) as response:
+                        proposals=json.load(response)['proposals'];self.assertEqual(proposals[0]['status'],'approved');self.assertEqual(proposals[1]['repeat_count'],3)
+                    with urlopen(base+'/api/effect-proposals?id='+identity) as response:self.assertEqual(json.load(response)['proposals'],proposals)
+                    detector.assert_called_once()
+                self.assertTrue((folder/'analysis-before-effects-v5.json').is_file())
                 for status in ('approved','rejected','pending'):
                     with decision(dict(id='fall',status=status)) as response:self.assertEqual(json.load(response)['status'],status)
                     self.assertEqual(json.loads((folder/'analysis.json').read_text())['effect_proposals'][0]['status'],status)

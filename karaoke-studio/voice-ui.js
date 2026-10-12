@@ -91,7 +91,7 @@
   $('openFeedback').addEventListener('click',()=>{
     if(busy()||!project)return;
     feedbackProject=projectId;feedbackSelection=roles.flatMap(role=>activeTakes(role).map(take=>({id:take.id,offset:Number($('offset-'+take.id)?.value||0)})));
-    $('feedbackConsent').checked=false;$('makeFeedback').disabled=true;$('saveFeedback').hidden=true;
+    $('feedbackConsent').checked=false;$('makeFeedback').textContent='Сохранить ZIP с примером';$('makeFeedback').hidden=false;$('makeFeedback').disabled=true;$('saveFeedback').hidden=true;
     $('feedbackStatus').textContent=feedbackSelection.length?'Проверь состав архива и отметь согласие.':'Сначала запиши хотя бы один фрагмент.';
     const list=element('ul');list.append(element('li','',`Исходная песня: ${project.filename||'загруженный файл'}`));
     for(const selected of feedbackSelection){const take=project.tracks.find(t=>t.id===selected.id);const region=take.region||[0,project.duration];list.append(element('li','',`${roles.find(r=>r.id===take.role)?.name||take.role} · ${seconds(region[0])} — ${seconds(region[1])} · запись микрофона`));}
@@ -104,7 +104,7 @@
     mutating=true;syncControls();$('makeFeedback').disabled=true;$('feedbackConsent').disabled=true;$('feedbackStatus').textContent='Создаю архив из выбранной песни и записей…';
     try {
       const result=await post('feedback',{consent:true,tracks:feedbackSelection,autotune:$('autotune').checked,tune_mode:$('tuneMode').value,tune_settings:window.tuneSettings?.(),pitch_falls:$('pitchFalls').checked,vocal_db:Number($('vocalGain').value),space:$('space').value});
-      $('saveFeedback').href=result.url;$('saveFeedback').hidden=false;$('feedbackStatus').textContent=`ZIP готов · ${(result.bytes/1048576).toFixed(1)} МБ. Сохрани его и передай по своему желанию.`;
+      $('saveFeedback').href=result.url;$('saveFeedback').hidden=false;$('makeFeedback').hidden=true;$('saveFeedback').click();$('feedbackStatus').textContent=`ZIP готов · ${(result.bytes/1048576).toFixed(1)} МБ. Прикрепи vocal-feedback.zip в этот чат: перетащи файл в поле сообщения или выбери его через кнопку вложения. Если скачивание не началось, нажми «Сохранить ZIP» ещё раз.`;
     } catch(error) {$('feedbackStatus').textContent=error.message;}
     finally {mutating=false;syncControls();$('feedbackConsent').disabled=false;$('makeFeedback').disabled=!$('feedbackConsent').checked;}
   });

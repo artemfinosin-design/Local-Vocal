@@ -33,7 +33,7 @@
   const playback=$('result'),meter=element('section','playback-score');
   meter.id='playbackScore';
   meter.innerHTML='<span class="eyebrow">ПОПАДАНИЕ В МЕЛОДИЮ</span><div class="playback-score-reading"><strong id="playbackScoreValue">—</strong><span>%</span></div><div id="playbackScoreTrack" class="playback-score-track" role="progressbar" aria-label="Попадание в ноты на текущем участке" aria-valuemin="0" aria-valuemax="100"><i></i></div><p id="playbackScoreHint">Начни слушать свою версию</p><button id="listenReview" type="button">✦ Вся оценка и советы</button>';
-  document.querySelector('.listening-panel').append(meter);
+  document.getElementById('resultBox').prepend(meter);
   $('listenReview').addEventListener('click',()=>$('openReview').click());
   let scoreVoices=[],lastScore=null,lastCue=-Infinity,cueContext;
   function cue(){

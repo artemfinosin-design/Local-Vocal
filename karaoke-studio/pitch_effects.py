@@ -97,16 +97,16 @@ def render_pitch_falls(voice,events,profile=None):
 
 
 def analyze_stutters(reference):
-    """Suggest similar vocal attacks whose spacing becomes denser; approval is required."""
+    """Match copied attacks even when a syllable has several envelope peaks."""
     from scipy.signal import find_peaks,butter,sosfilt,correlate
     x=np.mean(reference,axis=1) if reference.ndim==2 else reference
     size=441
     env=np.sqrt(np.mean(np.pad(x*x,(0,(-len(x))%size)).reshape(-1,size),axis=1)+1e-12)
     if len(env)<100 or np.max(env)<.005:return []
-    peaks,_=find_peaks(env,prominence=max(.003,np.percentile(env,80)*.22),distance=6)
+    peaks,_=find_peaks(env,prominence=max(.003,np.percentile(env,80)*.22),distance=3)
     filtered=sosfilt(butter(2,[180,6000],fs=RATE,btype='bandpass',output='sos'),x)
     def repeated_wave(points):
-        length=round(min(.08,float(np.min(np.diff(points)))*.75)*RATE);padding=round(.015*RATE)
+        length=round(min(.10,float(np.min(np.diff(points)))*.75)*RATE);padding=round(.015*RATE)
         start=round(points[0]*RATE);template=filtered[start:start+length];scores=[]
         if length<441 or len(template)!=length:return 0
         for point in points[1:]:
@@ -124,25 +124,27 @@ def analyze_stutters(reference):
         bands=np.array([np.mean(spectrum[(freq>=a)&(freq<b)]) for a,b in zip(np.geomspace(100,5000,13)[:-1],np.geomspace(100,5000,13)[1:])])
         return bands/(np.linalg.norm(bands)+1e-9)
     events=[]
-    for index in range(len(peaks)-3):
-        points=peaks[index:index+4]*.01;gaps=np.diff(points)
-        early=float(gaps[0]);late=float(gaps[-1])
-        if np.min(gaps)<.06 or np.max(gaps)>.65 or points[-1]-points[0]>2:continue
-        vectors=[signature(at) for at in points]
-        if any(v is None for v in vectors):continue
-        similarities=np.array([np.dot(vectors[0],v) for v in vectors[1:]])
-        if np.min(similarities)<.85:continue
-        copied=repeated_wave(np.maximum(0,points-.04))
-        if copied<.85:continue
-        # Extend to the last matching attack, including steady and accelerating
-        # chains. Never hard-code the number of copies.
-        for peak in peaks[index+4:]:
+    for index in range(len(peaks)-2):
+        first=peaks[index]*.01
+        if events and first<events[-1]['end']:continue
+        base=signature(first)
+        if base is None:continue
+        points=np.array([first]);copied=0
+        # Internal peaks from consonants must not break a copied-word chain.
+        # Search the next attack, but stop across a real phrase-sized gap.
+        for peak in peaks[index+1:]:
             candidate=peak*.01
             gap=candidate-points[-1]
-            if gap<.06 or gap>min(.65,max(np.diff(points))*1.35) or candidate-points[0]>8:break
+            if gap>.65 or candidate-first>8:break
+            if gap<.03:continue
             vector=signature(candidate)
-            if vector is None or np.dot(vectors[0],vector)<.85 or repeated_wave(np.maximum(0,np.r_[points[0],candidate]-.04))<.85:break
+            if vector is None or np.dot(base,vector)<.90:continue
+            score=repeated_wave(np.maximum(0,np.r_[first,candidate]-.04))
+            if score<.85:continue
             points=np.r_[points,candidate]
+            copied=score if not copied else min(copied,score)
+        if len(points)<3:continue
+        early=float(np.diff(points)[0])
         late=float(np.diff(points)[-1])
         start=float(max(0,points[0]-.04));end=float(min(len(x)/RATE,points[-1]+late))
         if events and start<events[-1]['end']:continue
@@ -163,10 +165,15 @@ def render_stutters(voice,events):
         from scipy.signal import find_peaks
         size=220
         envelope=np.sqrt(np.mean(np.pad(template**2,(0,(-len(template))%size)).reshape(-1,size),axis=1)+1e-12)
+        audible=np.flatnonzero(envelope>max(1e-5,float(np.max(envelope))*.18))
+        if not len(audible):continue
+        # Small singing delays inside the first word must not delay every copy.
+        first=max(0,(int(audible[0])-1)*size)
         attacks,_=find_peaks(envelope,prominence=max(.002,float(np.max(envelope))*.25),distance=11)
         if len(attacks)>1:
             cut=(attacks[1]-2)*size
-            if cut>RATE*.04:template=template[:cut]
+            if cut-first>RATE*.04:template=template[:cut]
+        template=template[first:]
         if len(template)<RATE*.04 or np.max(abs(template))<1e-7 or end<=start:continue
         replacement=np.zeros(end-start,np.float32);points=event['onsets']+[event['end']]
         for at,stop in zip(points[:-1],points[1:]):

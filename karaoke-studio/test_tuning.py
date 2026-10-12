@@ -7,6 +7,15 @@ from voice import tuning_options,tuning_profile
 import app
 
 class TuningChecks(unittest.TestCase):
+    def test_one_delay_throw_does_not_spread_across_later_singing(self):
+        from unittest.mock import patch
+        from effects import analyze_effects
+        def block(wet=0):
+            return dict(room=0,decay=.5,decay_evidence=0,delay_wet=wet,delay=.28,width=.3,confidence=.95,dry_evidence=0,active=True)
+        with patch('effects.estimate',side_effect=[block(.15)]+[block() for _ in range(5)]):
+            result=analyze_effects(np.zeros((RATE*24,2),np.float32))
+        self.assertEqual([b['delay_wet'] for b in result],[.15,0,0,0,0,0])
+
     def test_dry_pan_is_not_width_and_quiet_compression_is_level_independent(self):
         from effects import estimate,vocal_dynamics
         t=np.arange(RATE*3)/RATE

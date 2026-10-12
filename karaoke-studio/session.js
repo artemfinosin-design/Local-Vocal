@@ -60,6 +60,15 @@
   for(const node of [...options.children])if(!basic.includes(node))advanced.append(node);
   advancedDialog.querySelector('.dialog-content').append(advanced);
   const advancedButton=document.createElement('button');advancedButton.id='openAdvanced';advancedButton.className='editor-button';advancedButton.textContent='Эффекты, баланс и подробные настройки ↗';advancedButton.addEventListener('click',()=>advancedDialog.showModal());options.append(advancedButton);
+  const effectsDialog=dialog('effectsDialog','Эффекты песни');
+  effectsDialog.querySelector('.dialog-content').innerHTML='<p class="effect-instructions">1. Послушай найденный фрагмент. 2. Нажми «Добавить в песню». 3. Пересобери результат кнопкой ниже.</p>';
+  const spaceControl=document.getElementById('space').closest('label');spaceControl.firstChild.textContent='Звучание голоса · вся партия';effectsDialog.querySelector('.dialog-content').append(spaceControl);
+  const spaceHint=document.createElement('p');spaceHint.className='subtle';spaceHint.textContent='Авто оценивает пространство исходника. Остальные пресеты добавляют выбранный эффект ко всей партии.';effectsDialog.querySelector('.dialog-content').append(spaceHint);
+  const proposals=document.getElementById('effectProposals');proposals.open=true;effectsDialog.querySelector('.dialog-content').append(proposals);
+  const effectsButton=toolButton('openEffects','Эффекты песни',()=>{if(!busy()&&ready)effectsDialog.showModal();});
+  const effectShortcut=document.createElement('button');effectShortcut.type='button';effectShortcut.className='editor-button';effectShortcut.textContent='Выбрать эффекты песни ↗';effectShortcut.addEventListener('click',()=>effectsButton.click());options.querySelector('#pitchFalls').closest('label').after(effectShortcut);
+  const rebuild=document.createElement('button');rebuild.type='button';rebuild.id='rebuildEffects';rebuild.className='primary';rebuild.textContent='Применить эффекты и пересобрать';effectsDialog.querySelector('.dialog-content').append(rebuild);
+  rebuild.addEventListener('click',()=>{if(busy()||!ready)return;document.getElementById('pitchFalls').checked=true;effectsDialog.close();window.studioFlow.navigate('mix');document.getElementById('render').click();});
   const hint=document.createElement('p');hint.id='stageHint';hint.className='stage-hint';frame.querySelector('.session-navigation').after(hint);
   const scrollCue=document.createElement('button');scrollCue.type='button';scrollCue.className='scroll-cue';scrollCue.textContent='Ещё ниже ↓';scrollCue.setAttribute('aria-label','Показать следующие элементы рабочей панели');content.after(scrollCue);
   const updateScrollCue=()=>{scrollCue.hidden=frame.dataset.stage!=='mix'||content.scrollHeight-content.clientHeight-content.scrollTop<12;};
@@ -94,14 +103,13 @@
   shell.remove();document.querySelector('.hero').classList.add('intro-only');
   let roleIds=[],roleNames=[],index=0,ready=false,resultReady=false,lastStage='';
   const sections=[
-    ['Проект',['newSong','openHistory']],
-    ['Дорожки',['openSources']],
-    ['Запись',['openLyrics','openNoteCharts','openVoice']],
-    ['Обработка',['openAdvanced']],
-    ['Результат',['openReview']],
-    ['Приложение',['openAppearance','openUpdates','openFeedback']]
+    ['1 · Песня',['newSong','openHistory']],
+    ['2 · Запись',['openSources','openLyrics','openNoteCharts','openVoice']],
+    ['3 · Обработка',['openEffects','openAdvanced']],
+    ['4 · Результат',['openReview','openFeedback']],
+    ['Приложение',['openAppearance','openUpdates']]
   ];
-  const labels={newSong:'＋ Новая песня',openHistory:'▤ Мои песни',openSources:'≋ Дорожки и дубли',openLyrics:'Текст караоке',openNoteCharts:'Ноты караоке',openVoice:'Настройка микрофона',openAdvanced:'Эффекты и баланс',openReview:'Разбор пения',openAppearance:'Оформление',openUpdates:'Обновления',openFeedback:'Пример для улучшения'};
+  const labels={newSong:'＋ Новая песня',openHistory:'▤ Мои песни',openSources:'≋ Дорожки и дубли',openLyrics:'Текст караоке',openNoteCharts:'Ноты караоке',openVoice:'Настройка микрофона',openEffects:'✦ Эффекты песни',openAdvanced:'Автотюн и баланс',openReview:'Разбор пения',openAppearance:'Оформление',openUpdates:'Обновления',openFeedback:'↓ ZIP для отправки'};
   const partList=document.createElement('nav');partList.className='sidebar-parts';partList.setAttribute('aria-label','Вокальные партии');
   const mixJump=document.createElement('button');mixJump.id='goMix';mixJump.textContent='Задержка и сборка';mixJump.addEventListener('click',()=>window.studioFlow.navigate('mix'));
   const listenJump=document.createElement('button');listenJump.id='goListen';listenJump.textContent='Слушать результат';listenJump.addEventListener('click',()=>window.studioFlow.navigate('listen'));
@@ -110,9 +118,9 @@
   for(const [name,ids] of sections){
     const section=document.createElement(name==='Приложение'?'details':'section');section.className='sidebar-section';const title=document.createElement(name==='Приложение'?'summary':'h3');title.textContent=name;section.append(title);
     for(const id of ids){const node=existingControls[id];node.textContent=labels[id];section.append(node);}
-    if(name==='Дорожки')section.append(partList);
-    if(name==='Обработка')title.after(mixJump);
-    if(name==='Результат')section.append(listenJump);
+    if(name==='2 · Запись')section.querySelector('#openSources').after(partList);
+    if(name==='3 · Обработка')title.after(mixJump);
+    if(name==='4 · Результат')title.after(listenJump);
     tools.append(section);
   }
   actions.remove();
@@ -122,9 +130,11 @@
   document.getElementById('openSources').addEventListener('click',()=>{if(document.body.classList.contains('busy'))return;sourcesDialog.showModal();});
   function show() {
     const isRole=index>0&&index<=roleIds.length,isMix=index===roleIds.length+1&&index>0,isListen=index===roleIds.length+2&&index>0;
+    const upcoming={stage:index===0?'upload':isRole?'record':isMix?'mix':'listen',side:index%2};
+    if(lastStage&&lastStage!==upcoming.stage+upcoming.side)dispatchEvent(new CustomEvent('studio-before-stage'));
     upload.hidden=index!==0;record.hidden=!isRole;mix.hidden=!isMix;listen.hidden=!isListen;review.hidden=!review.dataset.available;openReview.hidden=false;openReview.disabled=!review.dataset.available;
     document.getElementById('openLyrics').disabled=document.getElementById('openNoteCharts').disabled=document.getElementById('openSources').disabled=!ready;document.getElementById('openFeedback').disabled=!ready;
-    mixJump.disabled=!ready||busy();listenJump.disabled=!resultReady||busy();document.getElementById('openAdvanced').disabled=!ready||busy();
+    mixJump.disabled=!ready||busy();listenJump.disabled=!resultReady||busy();document.getElementById('openAdvanced').disabled=effectShortcut.disabled=effectsButton.disabled=!ready||busy();rebuild.disabled=!ready||busy()||!roles.some(role=>activeTakes(role).length);
     for(const button of partList.children){button.disabled=!ready||busy();button.classList.toggle('active',isRole&&button.dataset.role===roleIds[index-1]);button.setAttribute('aria-current',isRole&&button.dataset.role===roleIds[index-1]?'step':'false');}
     sidebar.dataset.stage=isRole?'record':isMix?'mix':isListen?'listen':'upload';
     document.querySelectorAll('.track').forEach(track=>track.hidden=!isRole||track.dataset.role!==roleIds[index-1]);

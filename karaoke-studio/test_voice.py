@@ -31,6 +31,23 @@ def calibration():
 
 
 class VoiceChecks(unittest.TestCase):
+    def test_model_cannot_amplify_a_measured_room(self):
+        from effects import spatial
+        rate=11025;rng=np.random.default_rng(31);dry=np.zeros(rate*6,np.float32)
+        for at in (.4,1.8,3.4):
+            length=round(rate*.15);lo=round(at*rate)
+            dry[lo:lo+length]=rng.normal(0,.1,length)*np.hanning(length)
+        wet=dry[:,None]*np.ones((1,2))+spatial(dry,rate,room=.12,decay=1.2)[:len(dry)]
+        baseline=estimate(wet,rate,learned=False)
+        self.assertGreater(baseline['room'],0)
+        quiet=estimate(wet*.2,rate,learned=False)
+        self.assertAlmostEqual(quiet['decay'],baseline['decay'],places=4)
+        self.assertAlmostEqual(quiet['room'],baseline['room'],places=4)
+        with tempfile.TemporaryDirectory() as folder:
+            model=Path(folder)/'model.npz';model.touch()
+            with patch('effects.MODEL',model),patch('effects._load_model',return_value={'enabled':np.ones(4,dtype=bool)}),patch('effects._predict',return_value=np.array([.4,2,.3,.8])):
+                self.assertLessEqual(estimate(wet,rate)['room'],baseline['room'])
+
     def test_shutdown_refuses_busy_work_and_stops_only_when_idle(self):
         identity='d'*32
         with patch('app.jobs',{identity:{'state':'processing'}}),patch('app.stopping',False),patch('app.active_posts',0):

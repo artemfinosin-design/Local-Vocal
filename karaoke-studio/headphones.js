@@ -144,6 +144,17 @@ try {
   group.rotation.set(0,0,0);
   const cameraGoal=new THREE.Vector3(),lookGoal=new THREE.Vector3(),looking=new THREE.Vector3();
   let stage='upload',side=-1,visible=true,cameraAngle=0,cameraRadius=5.9,transition=null;
+  let departing=null;
+  addEventListener('studio-before-stage',()=>{
+    if(departing&&Number(surface.style.opacity)<.1)return;
+    departing?.node.remove();departing=null;
+    if(stage==='listen'||reduced)return;
+    const node=surface.cloneNode(true);node.classList.add('departing-surface');node.inert=true;node.setAttribute('aria-hidden','true');node.style.pointerEvents='none';
+    node.removeAttribute('id');node.querySelectorAll('[id]').forEach(item=>item.removeAttribute('id'));
+    node.querySelectorAll('audio').forEach(audio=>{audio.removeAttribute('src');audio.removeAttribute('autoplay');audio.preload='none';});
+    const originals=surface.querySelectorAll('canvas');node.querySelectorAll('canvas').forEach((canvas,i)=>{canvas.getContext('2d')?.drawImage(originals[i],0,0);});
+    surface.after(node);departing={node,side,width:screenWidth,height:screenHeight,planeWidth,planeHeight};
+  });
   let screenWidth=700,screenHeight=650,planeWidth=.64,planeHeight=.64;
   function targets() {
     if(stage==='listen'){cameraGoal.set(0,.05,Math.max(4.8,1.7/(Math.tan(Math.PI/10)*camera.aspect)));lookGoal.set(0,-.05,0);return;}
@@ -169,21 +180,21 @@ try {
   reduced=reduced||!!window.studioAppearance?.calm;
   addEventListener('studio-appearance',()=>{reduced=matchMedia('(prefers-reduced-motion: reduce)').matches||!!window.studioAppearance?.calm;});
   addEventListener('studio-stage',event=>setStage(event.detail));
-  function projectSurface() {
-    if(stage==='listen')return;
+  function projectSurface(node=surface,projectionSide=side,width=screenWidth,height=screenHeight,pw=planeWidth,ph=planeHeight) {
+    if(node===surface&&stage==='listen')return;
     scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);
-    const cup=cups[side];
-    const point=(u,v)=>new THREE.Vector4(side*.18,(.5-v)*planeHeight,-side*(u-.5)*planeWidth/cup.scale.z,1).applyMatrix4(cup.matrixWorld).applyMatrix4(camera.matrixWorldInverse).applyMatrix4(camera.projectionMatrix);
-    const a=point(0,0),b=point(1,0).sub(a).multiplyScalar(1/screenWidth),c=point(0,1).sub(a).multiplyScalar(1/screenHeight);
-    const center=cup.getWorldPosition(new THREE.Vector3()),normal=new THREE.Vector3(side,0,0).transformDirection(cup.matrixWorld);
+    const cup=cups[projectionSide];
+    const point=(u,v)=>new THREE.Vector4(projectionSide*.18,(.5-v)*ph,-projectionSide*(u-.5)*pw/cup.scale.z,1).applyMatrix4(cup.matrixWorld).applyMatrix4(camera.matrixWorldInverse).applyMatrix4(camera.projectionMatrix);
+    const a=point(0,0),b=point(1,0).sub(a).multiplyScalar(1/width),c=point(0,1).sub(a).multiplyScalar(1/height);
+    const center=cup.getWorldPosition(new THREE.Vector3()),normal=new THREE.Vector3(projectionSide,0,0).transformDirection(cup.matrixWorld);
     const facing=normal.dot(camera.position.clone().sub(center).normalize());
-    if(a.w<=0||facing<.15){surface.style.opacity='0';surface.inert=true;return;}
+    if(a.w<=0||facing<=0){node.style.opacity='0';node.inert=true;return;}
     const w=host.clientWidth/2,h=host.clientHeight/2,d=a.w;
     // Clip coordinates form a homography: the DOM plane shares the model's perspective.
     const matrix=[w*(b.x+b.w)/d,h*(-b.y+b.w)/d,0,b.w/d,w*(c.x+c.w)/d,h*(-c.y+c.w)/d,0,c.w/d,0,0,1,0,w*(a.x+a.w)/d,h*(-a.y+a.w)/d,0,1];
-    surface.style.transform='matrix3d('+matrix.join(',')+')';surface.style.opacity=String(Math.min(1,(facing-.15)/.45));
+    node.style.transform='matrix3d('+matrix.join(',')+')';node.style.opacity=String(Math.min(1,facing/.12));
     const moving=Math.abs(cameraAngle-Math.atan2(cameraGoal.x,cameraGoal.z))>.04;
-    surface.inert=moving;surface.style.pointerEvents=moving?'none':'auto';
+    node.inert=moving||node!==surface;node.style.pointerEvents=moving||node!==surface?'none':'auto';
   }
   function render(time) {
     requestAnimationFrame(render);
@@ -196,6 +207,7 @@ try {
     const scale=stage==='listen'?1:Math.max(1,planeWidth/.5*1.1);
     for(const cup of Object.values(cups))cup.scale.z=THREE.MathUtils.lerp(transition.scale,scale,ease);
     looking.lerpVectors(transition.look,lookGoal,ease);camera.lookAt(looking);renderer.render(scene,camera);projectSurface();
+    if(departing){const old=departing;projectSurface(old.node,old.side,old.width,old.height,old.planeWidth,old.planeHeight);if(progress===1){old.node.remove();departing=null;}}
   }
   new ResizeObserver(resize).observe(host);
   new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;}).observe(host);

@@ -65,9 +65,14 @@ class NoteBarsChecks(unittest.TestCase):
 
     def test_isolated_instrument_note_does_not_become_singing_cue(self):
         pitch=np.zeros(200);pitch[90:105]=440
-        confidence=np.ones(200)
+        confidence=np.full(200,.7)
         with patch('voice.track_pitch',return_value=(pitch,np.arange(200)*.01,confidence)):
             self.assertEqual(note_bars(np.zeros(100)),[])
+
+    def test_confident_short_word_is_not_lost_outside_long_phrase(self):
+        pitch=np.zeros(200);pitch[90:105]=440
+        with patch('voice.track_pitch',return_value=(pitch,np.arange(200)*.01,np.ones(200))):
+            self.assertEqual(note_bars(np.zeros(100)),[{'start':.9,'end':1.05,'note':69}])
 
     def test_reference_octave_glitch_does_not_create_random_target(self):
         pitch=np.full(100,220.);pitch[40:42]=440.

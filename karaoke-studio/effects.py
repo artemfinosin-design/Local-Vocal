@@ -174,18 +174,19 @@ def estimate(samples, rate=RATE, learned=True):
     mono = np.mean(reduced,axis=1) if reduced.ndim==2 else reduced
     hop = 220 if rate==RATE else max(1,round(rate*.02))
     padded = np.pad(mono**2,(0,(-len(mono))%hop))
-    envelope = np.sqrt(np.mean(padded.reshape(-1,hop),axis=1)+1e-12)
+    envelope = np.sqrt(np.mean(padded.reshape(-1,hop),axis=1)+1e-16)
+    envelope /= max(float(np.percentile(envelope,85)),1e-8)
     # Repeated abrupt clean endings are negative evidence. Continuous singing
     # with no exposed tail is merely inconclusive, not evidence of dry sound.
     dry_endings=0
-    ending_floor=max(.004,float(np.percentile(envelope,85))*.2)
+    ending_floor=.2
     for at in range(1,len(envelope)-31):
         if envelope[at-1]>ending_floor and envelope[at]<envelope[at-1]*.01:
             if np.max(envelope[at:at+30])<envelope[at-1]*.01:dry_endings+=1
     decays=[]
     for at in range(0,len(envelope)-30,5):
         part=envelope[at:at+30]
-        if part[0]<.004 or part[-1]>part[0]*.20 or np.min(part)<1e-5:
+        if part[0]<.02 or part[-1]>part[0]*.20 or np.min(part)<1e-5:
             continue
         log=np.log10(part)
         slope,intercept=np.polyfit(np.arange(30)*.02,log,1)
@@ -218,7 +219,7 @@ def estimate(samples, rate=RATE, learned=True):
         enabled = model['enabled'].astype(bool)
         result[enabled] = predicted[enabled]
     # Models may refine measured effects, but may never invent a wet send.
-    result[0] = min(result[0], .18) if diffuse_tail else 0
+    result[0] = min(result[0], room) if diffuse_tail else 0
     result[2] = measured_wet
     result[3] = float(np.clip(stereo_ratio, 0, 1)) if stereo_ratio > .12 else 0
     enabled[[0, 2, 3]] &= [diffuse_tail, False, False]
@@ -266,7 +267,16 @@ def analyze_effects(samples):
                 continue
             if anchor and abs(block['width']-anchor['width'])>max(.12,anchor['width']*.35):anchor=None
             if block[field] or not support:continue
-            nearest=anchor or min(support,key=lambda b:abs(b['time']-block['time']))
+            # Delays are phrase-local throws. A previous copied word does not
+            # justify echoing every later word in an otherwise similar scene.
+            if field=='delay_wet':
+                before=[b for b in support if b['time']<block['time']]
+                after=[b for b in support if b['time']>block['time']]
+                if not before or not after:continue
+                left,right=before[-1],after[0]
+                if right['time']-left['time']>8 or abs(left['delay']-right['delay'])>.015:continue
+                nearest=left
+            else:nearest=anchor or min(support,key=lambda b:abs(b['time']-block['time']))
             if anchor or (abs(nearest['time']-block['time'])<=4 and
                     abs(nearest['width']-block['width'])<=max(.12,nearest['width']*.35)):
                 block.update({key:nearest[key] for key in parameters if key in nearest})

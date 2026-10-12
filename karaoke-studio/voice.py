@@ -85,15 +85,16 @@ def track_pitch(samples, profile=None):
         confidence[i] = min(strength[i],max(0., float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))))
     pitch[confidence < .55] = 0
     if (profile or {}).get('reference'):
-        # A separated ensemble can look periodic while following a different
-        # singer. Independent agreement is required before using it as a target.
-        import pyworld
-        other,at=pyworld.dio(normalized,RATE//2,f0_floor=floor,f0_ceil=ceiling,frame_period=10)
-        other=np.interp(times,at,other)
+        # Cross-correlation tolerates breathy/processed singing that DIO marks
+        # unvoiced. Keep agreement on actual F0 to reject competing voices.
+        checked=sound.to_pitch_cc(time_step=.01,pitch_floor=floor,pitch_ceiling=ceiling)
+        other=np.interp(times,checked.xs()-.08,checked.selected_array['frequency'])
+        other_strength=np.interp(times,checked.xs()-.08,checked.selected_array['strength'])
         agree=(pitch>0)&(other>0)
         distance=np.full(len(pitch),np.inf)
         distance[agree]=abs(12*np.log2(pitch[agree]/other[agree]))
-        confidence[distance>.6]=0;pitch[distance>.6]=0
+        confidence=np.minimum(confidence,other_strength)
+        confidence[distance>.6]=0;pitch[(distance>.6)|(confidence<.55)]=0
     return pitch, times, confidence
 
 
@@ -134,8 +135,9 @@ def note_bars(samples):
     pitch,times,confidence=track_pitch(samples,{'reference':True})
     from scipy.ndimage import median_filter, uniform_filter1d
     trusted=(pitch>0)&(confidence>=.65)
-    # One isolated periodic sound is usually an instrument leaking into the vocal stem.
-    trusted &= uniform_filter1d(trusted.astype(float),size=81,mode='constant')>=.20
+    # Keep confident short words, even outside a long phrase. Only weak,
+    # isolated fragments need neighbouring vocal support.
+    trusted &= (confidence>=.85)|(uniform_filter1d(trusted.astype(float),size=81,mode='constant')>=.20)
     notes=np.zeros(len(pitch))
     notes[trusted]=69+12*np.log2(pitch[trusted]/440)
     edges=np.diff(np.r_[False,trusted,False].astype(int))

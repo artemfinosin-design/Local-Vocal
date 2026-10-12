@@ -249,10 +249,14 @@ def analyze(vocals, backing=None, full_vocals=None):
         detected+=analyze_stutters(original)
         detected+=analyze_colours(original)
         for event in detected:
-            identity=f"{reference}:{event['type']}:{event['start']:.2f}:{event['end']:.2f}"
-            event.update(id=hashlib.sha256(identity.encode()).hexdigest()[:24],reference=reference,status='pending')
+            identify_effect(event,reference)
             proposals.append(event)
-    return {"effect_proposals":proposals, "version": 13, "effect_version": 4, "hop": HOP / RATE, "profiles": profiles, "roles": roles}
+    return {"effect_proposals":proposals, "version": 13, "effect_version": 5, "hop": HOP / RATE, "profiles": profiles, "roles": roles}
+
+
+def identify_effect(event,reference):
+    identity=f"{reference}:{event['type']}:{event['start']:.2f}:{event['end']:.2f}"
+    event.update(id=hashlib.sha256(identity.encode()).hexdigest()[:24],reference=reference,status='pending')
 
 
 def markers(meta):

@@ -23,7 +23,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from audio_core import analyze, markers, mix, read_wav, read_reference, role_guide, save_meta, write_wav
+from audio_core import analyze, markers, mix, read_wav, read_reference, role_guide, save_meta, write_wav, identify_effect
+from pitch_effects import analyze_stutters
 from runtime import ffmpeg_path, BACKEND_VERSION
 from lyrics import guess_title, lookup, lrc_lines
 from youtube import video_url, download_audio, browser_source
@@ -512,10 +513,22 @@ class Handler(BaseHTTPRequestHandler):
                 payload['examples'] = len(effect_examples())
                 return self.reply(200, payload)
             if parsed.path == '/api/effect-proposals':
-                _,job,folder=self.project(query)
+                identity,job,folder=self.project(query)
                 if job['state']!='ready' or job.get('analysis_state')=='processing':raise ValueError('Дождись анализа')
-                meta=json.loads((folder/'analysis.json').read_text(encoding='utf-8'))
-                keys=('id','type','start','end','reference','status','confidence','uncertain_middle')
+                with processing_lock:
+                    meta=json.loads((folder/'analysis.json').read_text(encoding='utf-8'))
+                    if meta.get('effect_version',0)<5 and meta.get('profiles'):
+                        previous={e['id']:e.get('status','pending') for e in meta.get('effect_proposals',[])}
+                        proposals=[e for e in meta.get('effect_proposals',[]) if e['type']!='estimated_stutter']
+                        for reference in meta['profiles']:
+                            source=folder/('vocals.wav' if reference=='lead' and (folder/'vocals.wav').exists() else reference+'.wav')
+                            for event in analyze_stutters(read_wav(source)):
+                                identify_effect(event,reference)
+                                event['status']=previous.get(event['id'],'pending');proposals.append(event)
+                        shutil.copy2(folder/'analysis.json',folder/'analysis-before-effects-v5.json')
+                        meta.update(effect_proposals=proposals,effect_version=5);save_meta(folder/'analysis.json',meta)
+                        with lock:jobs[identity]['markers']=markers(meta);save_job(identity,touch=False)
+                keys=('id','type','start','end','reference','status','confidence','uncertain_middle','repeat_count')
                 return self.reply(200,{'proposals':[{key:event[key] for key in keys if key in event} for event in meta.get('effect_proposals',[])]})
             if parsed.path == "/api/job":
                 _, job, _ = self.project(query)
@@ -531,7 +544,7 @@ class Handler(BaseHTTPRequestHandler):
                     if selected.exists():
                         data=json.loads(selected.read_text(encoding='utf-8'))
                         return self.reply(200,dict(bars=data['bars'],duration=job['duration'],source='ultrastar',title=data.get('title','')))
-                    stamp=[BACKEND_VERSION,'phrase-notes-v2',source.stat().st_mtime_ns,source.stat().st_size]
+                    stamp=[BACKEND_VERSION,'phrase-notes-v3',source.stat().st_mtime_ns,source.stat().st_size]
                     data=json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else {}
                     if data.get('stamp')!=stamp:
                         voice=read_wav(source)
