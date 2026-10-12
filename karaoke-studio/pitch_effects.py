@@ -132,18 +132,35 @@ def analyze_stutters(reference):
             gap=candidate-points[-1]
             if gap>.65 or candidate-first>8:break
             if gap<.03:continue
-            if periodic and np.min(env[round(points[-1]*100):peak])>.3*min(env[peaks[index]],env[peak]):continue
-            score=repeated_wave(np.maximum(0,np.r_[first,candidate]-.02),gap)
+            if periodic:
+                between=env[round(points[-1]*100):peak]
+                clear=np.min(between)<=.3*min(env[round(points[-1]*100)],env[peak])
+                # Fast chops truncate the decay before silence; require an already
+                # accelerating chain and a sharp new attack, not a held vowel's LFO.
+                gaps=np.diff(points)
+                accelerating=len(gaps)>=2 and gaps[-1]<gaps[-2]*.9+.005 and gap<gaps[-1]*.9+.005
+                reset=len(between)-int(np.argmin(between))<=2
+                if not clear and not (accelerating and reset):continue
+            score=repeated_wave(np.maximum(0,np.r_[first,candidate]-(.01 if periodic else .02)),gap)
             if score<.85:continue
             points=np.r_[points,candidate]
             copied=score if not copied else min(copied,score)
         if len(points)<3:continue
         early=float(np.diff(points)[0])
         late=float(np.diff(points)[-1])
-        start=float(max(0,points[0]-.04));end=float(min(len(x)/RATE,points[-1]+late))
+        onsets=[]
+        for point in points:
+            peak=round(point*100)
+            before=peaks[peaks<peak]
+            lo=max(0,int(before[-1])+1 if len(before) else peak-12)
+            valley=lo+int(np.argmin(env[lo:peak+1]))
+            threshold=max(env[peak]*.18,env[valley]+.18*(env[peak]-env[valley]))
+            rising=np.flatnonzero(env[valley:peak+1]>=threshold)
+            onsets.append(float((valley+int(rising[0]))*.01))
+        start=onsets[0];end=float(min(len(x)/RATE,onsets[-1]+late))
         if events and start<events[-1]['end']:continue
         events.append({'type':'estimated_stutter','start':start,'end':end,
-            'onsets':np.maximum(0,points-.04).tolist(),'template_start':start,
+            'onsets':onsets,'template_start':start,
             'template_end':start+min(early,.3), 'repeat_count':len(points), 'confidence':copied})
     return events
 
