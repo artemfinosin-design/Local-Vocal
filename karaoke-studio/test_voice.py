@@ -31,6 +31,39 @@ def calibration():
 
 
 class VoiceChecks(unittest.TestCase):
+    def test_reference_recovers_breathy_notes_without_changing_trusted_pitch(self):
+        from scipy.signal import butter,sosfilt
+        from voice import _pitch_trace
+        t=np.arange(RATE*3)/RATE
+        hz=np.array([220.,246.94,261.63,293.66])[((t/.25).astype(int))%4]
+        phase=2*np.pi*np.cumsum(hz)/RATE
+        vowel=sum(sum(np.exp(-.5*((hz*h-fm)/180)**2) for fm in (650,1500,2700))*np.sin(h*phase)/h for h in range(2,31))
+        vowel=vowel/max(abs(vowel))*.1
+        noise=sosfilt(butter(2,[300,4500],fs=RATE,btype='bandpass',output='sos'),np.random.default_rng(932).normal(size=len(t)))
+        noise=noise/np.std(noise)*np.std(vowel)
+        audio=vowel+noise*.8
+        traces=[]
+        def measure(*args):
+            result=_pitch_trace(*args);traces.append(tuple(value.copy() for value in result[:3]));return result
+        with patch('voice._pitch_trace',side_effect=measure):pitch,times,confidence=track_pitch(audio,{'reference':True})
+        baseline,at,trust=traces[0]
+        np.testing.assert_array_equal(times,at)
+        np.testing.assert_array_equal(pitch[trust>=.65],baseline[trust>=.65])
+        np.testing.assert_array_equal(confidence[trust>=.65],trust[trust>=.65])
+        accepted=(times>.2)&(times<2.8)&(pitch>0)&(confidence>=.65)
+        self.assertGreater(accepted.sum(),.6*np.count_nonzero((times>.2)&(times<2.8)))
+        error=abs(1200*np.log2(pitch[accepted]/np.interp(times[accepted],t,hz)))
+        self.assertTrue(np.all(error<50))
+        audio[(t>1)&(t<2)]=0
+        pitch,times,confidence=track_pitch(audio,{'reference':True})
+        self.assertFalse(np.any((pitch>0)&(confidence>=.65)&(times>1.1)&(times<1.9)))
+
+    def test_reference_recovery_does_not_invent_notes_from_noise_or_silence(self):
+        noise=np.random.default_rng(932).normal(0,.02,RATE*3)
+        for audio in (noise,noise*1e-7,np.zeros(RATE*3)):
+            pitch,_,confidence=track_pitch(audio,{'reference':True})
+            self.assertFalse(np.any((pitch>0)&(confidence>=.65)))
+
     def test_fading_periodic_vowels_do_not_establish_echo(self):
         rate=11025;t=np.arange(rate*5)/rate
         harmonic=sum(np.sin(2*np.pi*220*k*t)/k for k in range(1,20))*.08

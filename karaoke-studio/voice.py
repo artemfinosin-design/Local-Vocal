@@ -2,7 +2,7 @@
 import math
 import numpy as np
 import parselmouth
-from scipy.signal import resample_poly
+from scipy.signal import resample_poly, butter, sosfiltfilt
 from scipy.ndimage import uniform_filter1d
 
 RATE = 44100
@@ -60,14 +60,36 @@ def track_pitch(samples, profile=None):
         ceiling = min(1400., max(1100., profile.get('high_hz',440) * 2.5))
     if profile and profile.get('pitch_bounds'):
         floor, ceiling = profile['pitch_bounds']
+    pitch,times,confidence,sound=_pitch_trace(normalized,reduced,len(signal)/RATE,floor,ceiling,profile)
+    if (profile or {}).get('reference') and np.any(confidence<.65):
+        # Filter only the analysis signal. Recover weak breathy notes only when
+        # the unfiltered AC and CC trackers independently support the same F0.
+        filtered=sosfiltfilt(butter(4,1800,fs=RATE//2,output='sos'),normalized)
+        fp,ft,fc,_=_pitch_trace(filtered,reduced,len(signal)/RATE,floor,ceiling,profile)
+        fp=np.interp(times,ft,fp);fc=np.interp(times,ft,fc)
+        weak=[];strengths=[]
+        for method in (sound.to_pitch_ac,sound.to_pitch_cc):
+            trace=method(time_step=.01,pitch_floor=floor,pitch_ceiling=ceiling,voicing_threshold=.25)
+            weak.append(np.interp(times,trace.xs()-.08,trace.selected_array['frequency']))
+            strengths.append(np.interp(times,trace.xs()-.08,trace.selected_array['strength']))
+        af,cf=weak;ac,cc=strengths
+        recovered=(confidence<.65)&(fc>=.75)&(af>0)&(cf>0)&(fp>0)&(ac>=.35)&(cc>=.35)
+        for other in (cf,fp):
+            distance=abs(12*np.log2(np.maximum(af,1e-8)/np.maximum(other,1e-8)))
+            recovered &= distance<.25
+        pitch[recovered]=fp[recovered];confidence[recovered]=fc[recovered]
+    return pitch,times,confidence
+
+
+def _pitch_trace(normalized,reduced,duration,floor,ceiling,profile):
     # Continuity and voicing costs suppress independent frame octave flips.
     # Padding keeps short syllables and calibration edges visible.
     padding=round(.08*(RATE//2))
     sound=parselmouth.Sound(np.pad(normalized,(padding,padding)),sampling_frequency=RATE//2)
     tracked=sound.to_pitch_ac(time_step=.01,pitch_floor=floor,pitch_ceiling=ceiling)
     times=tracked.xs()-.08
-    active=(times>=-1e-6)&(times<=len(signal)/RATE+1e-6)
-    times=np.clip(times[active],0,len(signal)/RATE);pitch=tracked.selected_array['frequency'][active].copy()
+    active=(times>=-1e-6)&(times<=duration+1e-6)
+    times=np.clip(times[active],0,duration);pitch=tracked.selected_array['frequency'][active].copy()
     strength=tracked.selected_array['strength'][active]
     rms = np.sqrt(np.maximum(uniform_filter1d(reduced ** 2, 441), 0) + 1e-16)
     frame_level = np.interp(times, np.arange(len(rms)) / (RATE // 2), rms)
@@ -95,7 +117,7 @@ def track_pitch(samples, profile=None):
         distance[agree]=abs(12*np.log2(pitch[agree]/other[agree]))
         confidence=np.minimum(confidence,other_strength)
         confidence[distance>.6]=0;pitch[(distance>.6)|(confidence<.55)]=0
-    return pitch, times, confidence
+    return pitch, times, confidence, sound
 
 
 def calibrate(samples):

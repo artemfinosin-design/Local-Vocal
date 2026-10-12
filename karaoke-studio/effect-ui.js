@@ -4,9 +4,12 @@
   window.loadEffectProposals=async()=>{
     const current=projectId,token=++generation;
     audios.forEach(audio=>audio.pause());audios=[];$('effectProposalList').replaceChildren();
+    $('effectSelectionStatus').textContent='Загружаю список эффектов…';
     try {
       const result=await request('/api/effect-proposals?id='+current);
       if(current!==projectId||token!==generation)return;
+      const selection=()=>{$('effectSelectionStatus').textContent=`Выбрано фрагментов: ${result.proposals.filter(event=>event.status==='approved').length} из ${result.proposals.length}. Звучание всей партии: ${$('space').selectedOptions[0].textContent}. Применяется при пересборке.`;};
+      $('space').onchange=selection;selection();
       $('effectSummary').textContent=`Найденные эффекты · ${result.proposals.length}`;
       $('effectProposalStatus').textContent=result.proposals.length?'Выбери нужные эффекты, затем нажми закреплённую внизу кнопку «Применить эффекты и пересобрать».':'Необычные эффекты не найдены уверенно. Можно выбрать звучание всей партии в списке выше и пересобрать песню.';
       for(const event of result.proposals){
@@ -17,14 +20,15 @@
         audio.addEventListener('timeupdate',()=>{if(audio.currentTime>=event.end+.15)audio.pause();});
         const controls=element('div','voice-actions');
         controls.append(button('▶ Исходник',async()=>{if(busy())return;pauseAll();audio.currentTime=Math.max(0,event.start-.4);try{await audio.play();}catch(error){$('effectProposalStatus').textContent=error.message;}}));
-        function paint(){status.textContent={pending:'Не выбран',approved:'Выбран для следующей сборки',rejected:'Не использовать'}[event.status]||'Не выбран';card.classList.toggle('effect-approved',event.status==='approved');}
+        function paint(){status.textContent={pending:'Не выбран',approved:'✓ Выбран для пересборки',rejected:'Не использовать'}[event.status]||'Не выбран';card.classList.toggle('effect-approved',event.status==='approved');select.textContent=event.status==='approved'?'✓ Выбран · отменить':'Выбрать эффект';select.setAttribute('aria-pressed',String(event.status==='approved'));reject.setAttribute('aria-pressed',String(event.status==='rejected'));selection();}
         async function decide(value){
           if(busy())return;mutating=true;pauseAll();syncControls();controls.querySelectorAll('button').forEach(node=>node.disabled=true);
           try{await post('effect-decision',{id:event.id,status:value});event.status=value;paint();window.studioFlow.dirty();}
           catch(error){$('effectProposalStatus').textContent=error.message;}
           finally{mutating=false;syncControls();controls.querySelectorAll('button').forEach(node=>node.disabled=false);}
         }
-        controls.append(button('Добавить в песню',()=>decide('approved'),'primary'),button('Не использовать',()=>decide('rejected')));paint();card.append(controls);$('effectProposalList').append(card);
+        const select=button('Выбрать эффект',()=>decide(event.status==='approved'?'pending':'approved'),'primary'),reject=button('Не использовать',()=>decide(event.status==='rejected'?'pending':'rejected'));
+        controls.append(select,reject);paint();card.append(controls);$('effectProposalList').append(card);
       }
     }catch(error){if(current===projectId)$('effectProposalStatus').textContent=error.message;}
   };

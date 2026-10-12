@@ -345,7 +345,7 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
     result,processed=shift_waveform(voice,user,times,correction,reliable)
     if diagnostics is not None:
         good=(user>0)&(confidence>.7)
-        diagnostics.append({'engine':'praat-psola-v4','mode':mode,'settings':options,
+        diagnostics.append({'engine':'praat-psola-v4','reference_tracker':'praat-ac-cc-filter-v1','mode':mode,'settings':options,
             'effective_speed_ms':speed,'confidence_threshold':threshold,'octave_offset':int(octave),
             'voiced_seconds':round(float(np.count_nonzero(good))*.01,2),
             'trusted_seconds':round(float(np.count_nonzero(reliable))*.01,2),

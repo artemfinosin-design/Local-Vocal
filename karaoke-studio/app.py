@@ -544,7 +544,7 @@ class Handler(BaseHTTPRequestHandler):
                     if selected.exists():
                         data=json.loads(selected.read_text(encoding='utf-8'))
                         return self.reply(200,dict(bars=data['bars'],duration=job['duration'],source='ultrastar',title=data.get('title','')))
-                    stamp=[BACKEND_VERSION,'phrase-notes-v3',source.stat().st_mtime_ns,source.stat().st_size]
+                    stamp=[BACKEND_VERSION,'phrase-notes-v4',source.stat().st_mtime_ns,source.stat().st_size]
                     data=json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else {}
                     if data.get('stamp')!=stamp:
                         voice=read_wav(source)
