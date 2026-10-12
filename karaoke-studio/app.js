@@ -35,7 +35,7 @@ window.refreshVocalEditors=()=>roles.forEach(role=>role.editor?.draw());
 function syncControls() {
   document.body.classList.toggle('busy', busy());
   $('recordBacking').disabled=busy();$('file').disabled = busy(); $('render').disabled = busy()||window.engineCompatible===false; $('stop').hidden = !recording;
-  for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,.studio-tools button:not(#openHelp):not(#openAppearance),.stage-actions button,.studio-sidebar button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
+  for (const control of document.querySelectorAll('.track button,.track input,.track select,.clip input,.clip button,.effect-card button,.mix-options input,.mix-options select,#stageBack,#stageNext,#reanalyze,#rebuildEffects,.result-actions button,.studio-tools button:not(#openHelp):not(#openAppearance),.stage-actions button,.studio-sidebar button,.mix-delay-take input,.mix-delay-take button')) control.disabled = busy();
   if(window.engineCompatible===false)document.querySelectorAll('.record-selection').forEach(node=>node.disabled=true);
   $('chooseFile').disabled=busy();$('resumeProject').disabled=busy();
   $('youtubeUrl').disabled=busy();$('importYoutube').disabled=busy();$('youtubeLogin').disabled=busy();$('youtubeBrowser').disabled=busy();

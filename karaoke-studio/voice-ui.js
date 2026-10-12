@@ -87,6 +87,10 @@
   });
   const feedback=window.studioDialogs.feedback,contents=feedback.querySelector('.dialog-content');
   contents.innerHTML='<p>Сохрани пример, если хочешь помочь разобраться с обработкой. Передавать его разработчику или кому-либо ещё решаешь ты.</p><div id="feedbackContents" class="feedback-contents"></div><label class="check-option"><input id="feedbackConsent" type="checkbox"> Я хочу сохранить исходную песню и мои записи голоса для добровольной передачи разработчику.</label><p class="subtle">Архив не отправляется автоматически. В ZIP войдут числовой личный профиль и журнал обработки этой песни. Аудио других проектов и запись настройки голоса в него не попадут. Записи берутся до автотюна и сведения; используй наушники, чтобы музыка не попала в микрофон.</p><button id="makeFeedback" class="primary" disabled>Создать ZIP с примером</button><a id="saveFeedback" class="button primary" download="vocal-feedback.zip" hidden>↓ Сохранить ZIP</a><p id="feedbackStatus" class="status" role="status" aria-live="polite"></p>';
+  const instructions=element('div','effect-instructions');instructions.innerHTML='<b>Как отправить пример в чат</b><ol><li>Проверь состав архива и поставь галочку согласия ниже.</li><li>Нажми «Сохранить ZIP с примером». Браузер скачает <strong>vocal-feedback.zip</strong>.</li><li>Найди ZIP в загрузках и перетащи его в поле сообщения этого чата или прикрепи через кнопку вложения.</li></ol><p>WAV — готовая песня. Для проверки обработки нужен именно ZIP: в нём есть исходник, сухой голос и настройки. Программа сама ничего не отправляет.</p>';
+  contents.prepend(instructions);
+  const feedbackActions=element('div','dialog-actions');
+  feedbackActions.append($('feedbackConsent').closest('label'),$('makeFeedback'),$('saveFeedback'),$('feedbackStatus'));feedback.append(feedbackActions);
   let feedbackSelection=[],feedbackProject;
   $('openFeedback').addEventListener('click',()=>{
     if(busy()||!project)return;

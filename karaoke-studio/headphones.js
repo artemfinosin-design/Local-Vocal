@@ -149,11 +149,25 @@ try {
     if(departing&&Number(surface.style.opacity)<.1)return;
     departing?.node.remove();departing=null;
     if(stage==='listen'||reduced)return;
-    const node=surface.cloneNode(true);node.classList.add('departing-surface');node.inert=true;node.setAttribute('aria-hidden','true');node.style.pointerEvents='none';
+    const node=surface.cloneNode(true);
+    const originals=[surface,...surface.querySelectorAll('*')],copies=[node,...node.querySelectorAll('*')];
+    // The live stage and IDs change during the turn; freeze the old screen's appearance.
+    const hidden=new Set();
+    originals.forEach((original,i)=>{
+      if(hidden.has(original.parentElement)){hidden.add(original);return;}
+      const copy=copies[i],style=getComputedStyle(original);
+      if(style.display==='none'){copy.style.display='none';hidden.add(original);return;}
+      copy.style.cssText=Array.from(style,key=>key+':'+style.getPropertyValue(key)).join(';');
+      copy.style.animation='none';copy.style.transition='none';
+      if(original instanceof HTMLSelectElement)copy.selectedIndex=original.selectedIndex;
+      if(original instanceof HTMLCanvasElement)copy.getContext('2d')?.drawImage(original,0,0);
+    });
+    node.classList.add('departing-surface');node.inert=true;node.setAttribute('aria-hidden','true');node.style.pointerEvents='none';
     node.removeAttribute('id');node.querySelectorAll('[id]').forEach(item=>item.removeAttribute('id'));
     node.querySelectorAll('audio').forEach(audio=>{audio.removeAttribute('src');audio.removeAttribute('autoplay');audio.preload='none';});
-    const originals=surface.querySelectorAll('canvas');node.querySelectorAll('canvas').forEach((canvas,i)=>{canvas.getContext('2d')?.drawImage(originals[i],0,0);});
-    surface.after(node);departing={node,side,width:screenWidth,height:screenHeight,planeWidth,planeHeight};
+    surface.after(node);
+    originals.forEach((original,i)=>{copies[i].scrollTop=original.scrollTop;copies[i].scrollLeft=original.scrollLeft;});
+    departing={node,side,width:screenWidth,height:screenHeight,planeWidth,planeHeight};
   });
   let screenWidth=700,screenHeight=650,planeWidth=.64,planeHeight=.64;
   function targets() {
