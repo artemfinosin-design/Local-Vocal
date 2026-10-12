@@ -7,6 +7,19 @@ from voice import tuning_options,tuning_profile
 import app
 
 class TuningChecks(unittest.TestCase):
+    def test_uncorrected_phrase_is_exact_when_another_phrase_is_tuned(self):
+        from voice import track_pitch
+        from pitch_shift import shift_waveform
+        t=np.arange(RATE*3)/RATE
+        voice=(.08*np.sin(2*np.pi*220*t)+.03*np.sin(2*np.pi*440*t)).astype(np.float32)
+        f,at,c=track_pitch(voice)
+        correction=np.where(at>=1.5,1.5,0)
+        result,_=shift_waveform(voice,f,at,correction,(f>0)&(c>.7))
+        np.testing.assert_array_equal(result[:RATE],voice[:RATE])
+        changed,when,confidence=track_pitch(result)
+        active=(when>2)&(when<2.7)&(changed>0)&(confidence>.7)
+        self.assertAlmostEqual(float(np.median(changed[active])),220*2**(1.5/12),delta=2)
+
     def test_one_delay_throw_does_not_spread_across_later_singing(self):
         from unittest.mock import patch
         from effects import analyze_effects
@@ -109,7 +122,7 @@ class TuningChecks(unittest.TestCase):
         rms=[np.sqrt(np.mean(result[i:i+2205]**2)) for i in range(RATE,7*RATE,2205)]
         self.assertLess(float(np.std(rms)/np.mean(rms)),.08)
         self.assertGreater(logs[0]['processed_seconds'],6)
-        self.assertEqual(logs[0]['engine'],'praat-psola-v2')
+        self.assertEqual(logs[0]['engine'],'praat-psola-v3')
     def test_reference_crossing_tritone_does_not_flip_target_octave(self):
         from voice import track_pitch
         t=np.arange(RATE*5)/RATE

@@ -517,7 +517,7 @@ class Handler(BaseHTTPRequestHandler):
                 if job['state']!='ready' or job.get('analysis_state')=='processing':raise ValueError('Дождись анализа')
                 with processing_lock:
                     meta=json.loads((folder/'analysis.json').read_text(encoding='utf-8'))
-                    if meta.get('effect_version',0)<5 and meta.get('profiles'):
+                    if meta.get('effect_version',0)<6 and meta.get('profiles'):
                         previous={e['id']:e.get('status','pending') for e in meta.get('effect_proposals',[])}
                         proposals=[e for e in meta.get('effect_proposals',[]) if e['type']!='estimated_stutter']
                         for reference in meta['profiles']:
@@ -525,8 +525,8 @@ class Handler(BaseHTTPRequestHandler):
                             for event in analyze_stutters(read_wav(source)):
                                 identify_effect(event,reference)
                                 event['status']=previous.get(event['id'],'pending');proposals.append(event)
-                        shutil.copy2(folder/'analysis.json',folder/'analysis-before-effects-v5.json')
-                        meta.update(effect_proposals=proposals,effect_version=5);save_meta(folder/'analysis.json',meta)
+                        shutil.copy2(folder/'analysis.json',folder/'analysis-before-effects-v6.json')
+                        meta.update(effect_proposals=proposals,effect_version=6);save_meta(folder/'analysis.json',meta)
                         with lock:jobs[identity]['markers']=markers(meta);save_job(identity,touch=False)
                 keys=('id','type','start','end','reference','status','confidence','uncertain_middle','repeat_count')
                 return self.reply(200,{'proposals':[{key:event[key] for key in keys if key in event} for event in meta.get('effect_proposals',[])]})

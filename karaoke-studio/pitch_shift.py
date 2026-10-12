@@ -9,8 +9,8 @@ RATE=44100
 
 def shift_waveform(voice, pitch, times, correction, reliable):
     voice=np.asarray(voice,np.float32)
-    eligible=np.asarray(reliable,bool)&(pitch>0)
-    if not np.any(eligible & (abs(correction)>.02)):
+    eligible=np.asarray(reliable,bool)&(pitch>0)&(abs(correction)>.02)
+    if not np.any(eligible):
         return voice.copy(),0
     sound=parselmouth.Sound(np.asarray(voice,dtype=float),sampling_frequency=RATE)
     voiced=pitch[eligible]
@@ -22,14 +22,13 @@ def shift_waveform(voice, pitch, times, correction, reliable):
             for i in range(1,call(tier,'Get number of points')+1)]
     if not points:return voice.copy(),0
     call(tier,'Remove points between',0,len(voice)/RATE)
-    target=np.log2(pitch[eligible])+correction[eligible]/12
     for time,frequency in points:
         index=min(len(times)-1,int(np.searchsorted(times,time)))
         if index and abs(times[index-1]-time)<abs(times[index]-time):index-=1
         if eligible[index]:
-            # Never interpolate a frequency against an unvoiced zero: that
-            # invents a dive by an octave at consonant/voicing boundaries.
-            destination=float(2**np.interp(time,times[eligible],target))
+            # Shift Praat's own tier by the measured correction. Replacing it
+            # with a second tracker's F0 retunes even correctly sung notes.
+            destination=float(frequency*2**(np.interp(time,times,correction)/12))
         else:destination=frequency
         call(tier,'Add point',time,destination)
     call([tier,manipulation],'Replace pitch tier')

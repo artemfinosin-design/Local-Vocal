@@ -3,6 +3,7 @@ import numpy as np
 import pyworld
 from scipy.ndimage import median_filter,uniform_filter1d
 from voice import track_pitch
+from effects import waveform_periodicity
 RATE=44100
 
 
@@ -105,8 +106,9 @@ def analyze_stutters(reference):
     if len(env)<100 or np.max(env)<.005:return []
     peaks,_=find_peaks(env,prominence=max(.003,np.percentile(env,80)*.22),distance=3)
     filtered=sosfilt(butter(2,[180,6000],fs=RATE,btype='bandpass',output='sos'),x)
-    def repeated_wave(points):
-        length=round(min(.10,float(np.min(np.diff(points)))*.75)*RATE);padding=round(.015*RATE)
+    def repeated_wave(points,gap):
+        # The last interval sets the available length as repetitions accelerate.
+        length=round(min(.06,gap*.5)*RATE);padding=round(.015*RATE)
         start=round(points[0]*RATE);template=filtered[start:start+length];scores=[]
         if length<441 or len(template)!=length:return 0
         for point in points[1:]:
@@ -116,19 +118,12 @@ def analyze_stutters(reference):
             energy=np.sqrt(np.maximum(np.convolve(part**2,np.ones(length),'valid'),0)*np.sum(template**2))
             scores.append(float(np.max(dot/(energy+1e-10))))
         return float(np.median(scores)) if scores and min(scores)>.8 else 0
-    def signature(at):
-        clip=x[max(0,round((at-.025)*RATE)):min(len(x),round((at+.07)*RATE))][::4]
-        if len(clip)<128:return None
-        spectrum=np.abs(np.fft.rfft(clip*np.hanning(len(clip))))
-        freq=np.fft.rfftfreq(len(clip),4/RATE)
-        bands=np.array([np.mean(spectrum[(freq>=a)&(freq<b)]) for a,b in zip(np.geomspace(100,5000,13)[:-1],np.geomspace(100,5000,13)[1:])])
-        return bands/(np.linalg.norm(bands)+1e-9)
     events=[]
     for index in range(len(peaks)-2):
         first=peaks[index]*.01
         if events and first<events[-1]['end']:continue
-        base=signature(first)
-        if base is None:continue
+        start=max(0,round((first-.02)*RATE))
+        periodic=waveform_periodicity(filtered[start:start+round(.06*RATE)],RATE)>.85
         points=np.array([first]);copied=0
         # Internal peaks from consonants must not break a copied-word chain.
         # Search the next attack, but stop across a real phrase-sized gap.
@@ -137,9 +132,8 @@ def analyze_stutters(reference):
             gap=candidate-points[-1]
             if gap>.65 or candidate-first>8:break
             if gap<.03:continue
-            vector=signature(candidate)
-            if vector is None or np.dot(base,vector)<.90:continue
-            score=repeated_wave(np.maximum(0,np.r_[first,candidate]-.04))
+            if periodic and np.min(env[round(points[-1]*100):peak])>.3*min(env[peaks[index]],env[peak]):continue
+            score=repeated_wave(np.maximum(0,np.r_[first,candidate]-.02),gap)
             if score<.85:continue
             points=np.r_[points,candidate]
             copied=score if not copied else min(copied,score)

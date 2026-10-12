@@ -31,6 +31,17 @@ def calibration():
 
 
 class VoiceChecks(unittest.TestCase):
+    def test_fading_periodic_vowels_do_not_establish_echo(self):
+        rate=11025;t=np.arange(rate*5)/rate
+        harmonic=sum(np.sin(2*np.pi*220*k*t)/k for k in range(1,20))*.08
+        envelope=np.zeros(len(t))
+        for at in (.4,1.7,3.1):
+            envelope[(t>=at)&(t<at+.3)]=1
+            tail=(t>=at+.3)&(t<at+.8)
+            envelope[tail]=.35*np.exp(-(t[tail]-at-.3)*4)
+        vowel=(harmonic*envelope).astype(np.float32)
+        self.assertEqual(estimate(np.column_stack([vowel,vowel]),rate,learned=False)['delay_wet'],0)
+
     def test_model_cannot_amplify_a_measured_room(self):
         from effects import spatial
         rate=11025;rng=np.random.default_rng(31);dry=np.zeros(rate*6,np.float32)

@@ -15,7 +15,7 @@
   }
   $('openVoice').addEventListener('click',()=>{if(busy())return;dialog.showModal();loadProfile();});
   $('skipVoice').addEventListener('click',()=>{if(session)return;sessionStorage.setItem('voiceSetupSkipped','1');dialog.close();$('recordStatus').textContent='Настройка пропущена. Нажми запись, чтобы начать петь.';});
-  window.voiceSetup={beforeRecording(){if(profile||sessionStorage.getItem('voiceSetupSkipped'))return true;$('openVoice').click();return false;}};
+  window.voiceSetup={noiseFloor(){return profile?.noise_rms||0;},beforeRecording(){if(profile||sessionStorage.getItem('voiceSetupSkipped'))return true;$('openVoice').click();return false;}};
   loadProfile();
   $('resetVoice').addEventListener('click',async()=>{
     if(busy())return;

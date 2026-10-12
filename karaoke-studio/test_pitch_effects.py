@@ -23,6 +23,30 @@ def slide(tape=True):
     x*=.15/max(abs(x));return x.astype(np.float32)
 
 class FallChecks(unittest.TestCase):
+    def test_loudness_pulses_of_one_held_vowel_are_not_copied_words(self):
+        t=np.arange(RATE*3)/RATE
+        vowel=sum(np.sin(2*np.pi*200*k*t)/k for k in range(1,16))*.03
+        self.assertFalse(analyze_stutters(vowel*(.8+.2*np.sin(2*np.pi*5*t))))
+        reference=np.zeros(len(t),np.float32);length=round(.09*RATE)
+        template=vowel[:length]*np.hanning(length)
+        for at in (.5,.8,1.1):
+            lo=round(at*RATE);reference[lo:lo+length]=template
+        self.assertTrue(analyze_stutters(reference))
+
+    def test_accelerating_chops_keep_the_last_fast_copies(self):
+        rng=np.random.default_rng(78);length=round(.07*RATE)
+        template=rng.normal(0,.1,length).astype(np.float32)*np.hanning(length)
+        points=[.5,.8,1.05,1.25,1.40,1.50,1.57,1.62,1.66]
+        reference=np.zeros(RATE*3,np.float32)
+        for i,at in enumerate(points):
+            duration=points[i+1]-at if i+1<len(points) else .07
+            part=template[:min(length,round(duration*RATE))]
+            lo=round(at*RATE);reference[lo:lo+len(part)]=part
+        events=analyze_stutters(reference)
+        self.assertEqual(len(events),1)
+        self.assertEqual(events[0]['repeat_count'],len(points))
+        np.testing.assert_allclose(events[0]['onsets'],points,atol=.015)
+
     def test_three_copies_with_internal_peaks_and_fast_chops_are_detected(self):
         rng=np.random.default_rng(71)
         template=rng.normal(0,.08,round(.17*RATE)).astype(np.float32)
@@ -101,7 +125,7 @@ class FallChecks(unittest.TestCase):
                         proposals=json.load(response)['proposals'];self.assertEqual(proposals[0]['status'],'approved');self.assertEqual(proposals[1]['repeat_count'],3)
                     with urlopen(base+'/api/effect-proposals?id='+identity) as response:self.assertEqual(json.load(response)['proposals'],proposals)
                     detector.assert_called_once()
-                self.assertTrue((folder/'analysis-before-effects-v5.json').is_file())
+                self.assertTrue((folder/'analysis-before-effects-v6.json').is_file())
                 for status in ('approved','rejected','pending'):
                     with decision(dict(id='fall',status=status)) as response:self.assertEqual(json.load(response)['status'],status)
                     self.assertEqual(json.loads((folder/'analysis.json').read_text())['effect_proposals'][0]['status'],status)

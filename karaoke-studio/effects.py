@@ -122,6 +122,17 @@ def _predict(vector, model):
     return np.mean(predictions, axis=0)
 
 
+def waveform_periodicity(samples, rate):
+    """Normalized short-lag agreement; a held vowel is not a unique fingerprint."""
+    size=len(samples)
+    lags=np.arange(max(1,round(rate/1400)),min(size//3,round(rate/55))+1)
+    if not len(lags):return 0.
+    cross=correlate(samples,samples,mode='full',method='fft')[size-1:]
+    energy=np.r_[0,np.cumsum(samples**2)]
+    scores=cross[lags]/np.sqrt(np.maximum(energy[size-lags]*(energy[size]-energy[lags]),1e-20))
+    return float(np.max(scores))
+
+
 def delay_evidence(samples, rate):
     """Find attenuated copies of actual waveform endings, not rhythmic envelopes."""
     mono = np.mean(samples, axis=1) if samples.ndim == 2 else samples
@@ -146,6 +157,10 @@ def delay_evidence(samples, rate):
         bandwidth = np.sqrt(np.sum(spectrum * (frequencies-center)**2) / (np.sum(spectrum)+1e-12))
         if bandwidth < 300:
             continue  # Sustained periodic vowels alone cannot establish a copied transient.
+        # A harmonic vowel can be broadband and still match every later period.
+        # Its natural fading must not establish a delay send.
+        if waveform_periodicity(template,rate)>.85:
+            continue
         first = end - width + round(rate * .08)
         search = signal[first:end + round(rate * .6)]
         energy = np.convolve(search ** 2, np.ones(width), mode='valid')

@@ -1,14 +1,14 @@
 /* Visual feedback reads the microphone; it never changes the recorded signal. */
-function detectNote(samples, rate) {
+function detectNote(samples, rate, noiseFloor=0) {
   let energy=0;for(const value of samples)energy+=value*value;
-  if(Math.sqrt(energy/samples.length)<.008)return null;
-  const half=Math.floor(samples.length/2), max=Math.min(half-1,Math.ceil(rate/65));
+  if(Math.sqrt(energy/samples.length)<Math.max(.0001,noiseFloor*2.5))return null;
+  const half=Math.floor(samples.length/2), max=Math.min(half-1,Math.ceil(rate/45));
   const difference=new Float32Array(max+1);let sum=0;
   for(let lag=1;lag<=max;lag++){
     let delta=0;for(let i=0;i<half;i++){const d=samples[i]-samples[i+lag];delta+=d*d;}
     sum+=delta;difference[lag]=sum?delta*lag/sum:1;
   }
-  for(let lag=Math.floor(rate/1100);lag<max-1;lag++){
+  for(let lag=Math.max(2,Math.floor(rate/1400));lag<max-1;lag++){
     if(difference[lag]>.12)continue;
     while(lag<max-1&&difference[lag+1]<difference[lag])lag++;
     const a=difference[lag-1],b=difference[lag],c=difference[lag+1];
@@ -18,23 +18,31 @@ function detectNote(samples, rate) {
   return null;
 }
 function noteDistance(a,b){return Math.abs(((a-b+6)%12+12)%12-6);}
-if(typeof module!=='undefined')module.exports={detectNote,noteDistance};
+function microphoneTime(clock,samples,rate,note){
+  const period=note===null?0:1/(440*2**((note-69)/12));
+  return clock-samples/rate*.75+period/2;
+}
+if(typeof module!=='undefined')module.exports={detectNote,noteDistance,microphoneTime};
 if(typeof document!=='undefined')(()=>{
   const canvas=document.getElementById('noteCanvas'),status=document.getElementById('noteLive');
-  let bars=[],key='',generation=0,context,source,analyser,music,frame=0,lastPitchTime=0,pitch=null,hit=false,loading=false;
+  let bars=[],key='',generation=0,context,source,analyser,music,frame=0,lastPitchTime=0,pitch=null,pitchClock=0,hit=false,loading=false;
   const names=['До','До♯','Ре','Ре♯','Ми','Фа','Фа♯','Соль','Соль♯','Ля','Ля♯','Си'];
   const label=note=>names[((Math.round(note)%12)+12)%12];
-  function draw(time=0){
+  function draw(time=0,animate=true){
     const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
     const ratio=Math.min(devicePixelRatio||1,2);canvas.width=w*ratio;canvas.height=h*ratio;
     const ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);
     const clock=music?.currentTime||0,visible=bars.filter(b=>b.end>clock-1.5&&b.start<clock+4.5);
-    const current=bars.find(b=>b.start<=clock&&b.end>=clock);
     if(analyser&&time-lastPitchTime>90){
       const raw=new Float32Array(analyser.fftSize);analyser.getFloatTimeDomainData(raw);
       const step=Math.max(1,Math.floor(context.sampleRate/12000)),data=new Float32Array(Math.floor(raw.length/step));
       for(let i=0;i<data.length;i++)data[i]=raw[i*step];
-      pitch=detectNote(data,context.sampleRate/step);lastPitchTime=time;
+      pitch=detectNote(data,context.sampleRate/step,window.voiceSetup?.noiseFloor()||0);lastPitchTime=time;
+      // YIN compares the older half of the microphone buffer with shifted copies.
+      pitchClock=microphoneTime(clock,raw.length,context.sampleRate,pitch);
+    }
+    const current=bars.find(b=>b.start<=(analyser?pitchClock:clock)&&b.end>(analyser?pitchClock:clock));
+    if(analyser){
       hit=pitch!==null&&!!current&&noteDistance(pitch,current.note)<=.5;
       status.textContent=pitch===null?'Пой — здесь появится твоя нота':`${label(pitch)} · ${hit?'В ноту!':current?'Следуй полоске':'Пауза в партии'}`;
     }
@@ -48,12 +56,12 @@ if(typeof document!=='undefined')(()=>{
       ctx.beginPath();ctx.roundRect(x(bar.start),y(bar.note)-4,Math.max(4,x(bar.end)-x(bar.start)),8,4);ctx.fill();
     }
     ctx.shadowBlur=0;ctx.strokeStyle='#ff985a';ctx.beginPath();ctx.moveTo(w*.25,0);ctx.lineTo(w*.25,h);ctx.stroke();
-    if(pitch!==null&&current){const adjusted=pitch+12*Math.round((current.note-pitch)/12);ctx.fillStyle=hit?'#e6ff9e':'#ff985a';ctx.beginPath();ctx.arc(w*.25,y(adjusted),hit&&!calm?7+Math.sin(time/100)*1.5:5,0,Math.PI*2);ctx.fill();}
+    if(pitch!==null&&current){const adjusted=pitch+12*Math.round((current.note-pitch)/12);ctx.fillStyle=hit?'#e6ff9e':'#ff985a';ctx.beginPath();ctx.arc(x(pitchClock),y(adjusted),hit&&!calm?7+Math.sin(time/100)*1.5:5,0,Math.PI*2);ctx.fill();}
     canvas.classList.toggle('note-hit',hit&&!calm);
     if(!bars.length){ctx.fillStyle='#9bb1ba';ctx.font='13px sans-serif';ctx.fillText(loading?'Размечаем мелодию…':'Для этой партии нет уверенных нот',12,h/2);}
-    if(analyser||music&&!music.paused)frame=requestAnimationFrame(draw);
+    if(animate&&(analyser||music&&!music.paused))frame=requestAnimationFrame(draw);
   }
-  function stop(){cancelAnimationFrame(frame);source?.disconnect();analyser?.disconnect();if(context)context.close().catch(()=>{});context=source=analyser=null;pitch=null;hit=false;music=null;canvas.classList.remove('note-hit');draw();}
+  function stop(){cancelAnimationFrame(frame);source?.disconnect();analyser?.disconnect();if(context)context.close().catch(()=>{});context=source=analyser=null;pitch=null;hit=false;music=roles.find(item=>item.id===key.split(':')[1])?.guide||null;canvas.classList.remove('note-hit');draw(0,false);}
   window.noteGuide={
     async select(id,role,force=false){
       const next=id+':'+role;if(next===key&&!force)return;stop();key=next;const ticket=++generation;bars=[];loading=true;music=roles.find(item=>item.id===role)?.guide||null;status.textContent='Размечаем мелодию…';draw();

@@ -251,7 +251,7 @@ def analyze(vocals, backing=None, full_vocals=None):
         for event in detected:
             identify_effect(event,reference)
             proposals.append(event)
-    return {"effect_proposals":proposals, "version": 13, "effect_version": 5, "hop": HOP / RATE, "profiles": profiles, "roles": roles}
+    return {"effect_proposals":proposals, "version": 13, "effect_version": 6, "hop": HOP / RATE, "profiles": profiles, "roles": roles}
 
 
 def identify_effect(event,reference):
@@ -345,7 +345,7 @@ def pitch_match(voice, reference, profile=None, mode="gentle", settings=None, di
     result,processed=shift_waveform(voice,user,times,correction,reliable)
     if diagnostics is not None:
         good=(user>0)&(confidence>.7)
-        diagnostics.append({'engine':'praat-psola-v2','mode':mode,'settings':options,
+        diagnostics.append({'engine':'praat-psola-v3','mode':mode,'settings':options,
             'effective_speed_ms':speed,'confidence_threshold':threshold,'octave_offset':int(octave),
             'voiced_seconds':round(float(np.count_nonzero(good))*.01,2),
             'trusted_seconds':round(float(np.count_nonzero(reliable))*.01,2),
